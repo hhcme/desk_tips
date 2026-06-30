@@ -1,11 +1,15 @@
 import SwiftUI
 import DeskTipsCore
 
-/// Full-featured active todo list for the main window "待办" tab.
+/// Enhanced todo list with category filter, priority, due date.
 struct TodoListView: View {
     @ObservedObject var store: TodoStore
     @State private var newTodoText = ""
-    @State private var editingID: UUID?
+    @State private var selectedCategoryID: UUID? = nil
+    @State private var selectedPriority: Priority = .medium
+    @State private var hasDueDate = false
+    @State private var dueDate = Date().addingTimeInterval(3600)
+    @State private var filterCategoryID: UUID? = nil  // nil = all
 
     var body: some View {
         VStack(spacing: 0) {
@@ -14,52 +18,87 @@ struct TodoListView: View {
                 Text("待办事项")
                     .font(.headline)
                 Spacer()
-                Text("\(store.items.count) 项")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                // Category filter
+                Picker("", selection: $filterCategoryID) {
+                    Text("全部").tag(UUID?.none)
+                    ForEach(store.categories) { cat in
+                        Label(cat.name, systemImage: cat.iconName).tag(UUID?.some(cat.id))
+                    }
+                    Text("未分类").tag(UUID?.some(UUID(uuidString: "00000000-0000-0000-0000-000000000000")!))
+                }
+                .frame(width: 120)
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
 
             Divider()
 
+            // Add form
+            addForm
+                .padding(12)
+
+            Divider()
+
             // List
-            if store.items.isEmpty {
+            if filteredItems.isEmpty {
                 emptyState
             } else {
                 todoList
             }
-
-            Divider()
-
-            // Add bar
-            addBar
-                .padding(12)
         }
     }
 
-    // MARK: - Empty State
+    // MARK: - Add Form
 
-    private var emptyState: some View {
+    private var addForm: some View {
         VStack(spacing: 8) {
-            Image(systemName: "tray")
-                .font(.largeTitle)
-                .foregroundStyle(.secondary)
-            Text("暂无待办")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            Text("在下方添加新的待办事项")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+            HStack(spacing: 8) {
+                Image(systemName: "plus.circle.fill")
+                    .foregroundStyle(.tint)
+                TextField("添加新待办…", text: $newTodoText)
+                    .textFieldStyle(.plain)
+                    .onSubmit { addTodo() }
+                Button("添加") { addTodo() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(newTodoText.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+
+            HStack(spacing: 12) {
+                // Category picker
+                Picker("", selection: $selectedCategoryID) {
+                    Text("无分类").tag(UUID?.none)
+                    ForEach(store.categories) { cat in
+                        Label(cat.name, systemImage: cat.iconName).tag(UUID?.some(cat.id))
+                    }
+                }
+                .frame(width: 100)
+
+                // Priority
+                Picker("", selection: $selectedPriority) {
+                    Text("高").tag(Priority.high)
+                    Text("中").tag(Priority.medium)
+                    Text("低").tag(Priority.low)
+                }
+                .frame(width: 70)
+
+                // Due date
+                Toggle("截止", isOn: $hasDueDate)
+                    .fixedSize()
+                if hasDueDate {
+                    DatePicker("", selection: $dueDate)
+                        .labelsHidden()
+                        .frame(width: 160)
+                }
+            }
+            .font(.caption)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // MARK: - Todo List
+    // MARK: - List
 
     private var todoList: some View {
         List {
-            ForEach(store.items.filter { !$0.isCompleted }) { item in
+            ForEach(filteredItems) { item in
                 todoRow(item)
             }
             .onMove { from, to in
@@ -74,71 +113,84 @@ struct TodoListView: View {
 
     private func todoRow(_ item: TodoItem) -> some View {
         HStack(spacing: 10) {
-            // Complete button
-            Button {
-                store.toggle(item)
-            } label: {
+            // Complete
+            Button { store.toggle(item) } label: {
                 Image(systemName: "circle")
                     .font(.system(size: 16))
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
 
-            // Title (editable on double-click)
-            if editingID == item.id {
-                TextField("", text: Binding(
-                    get: { item.title },
-                    set: { store.updateTitle(id: item.id, newTitle: $0) }
-                ))
-                .textFieldStyle(.plain)
-                .onSubmit { editingID = nil }
-            } else {
-                Text(item.title)
-                    .font(.body)
-                    .onTapGesture(count: 2) {
-                        editingID = item.id
-                    }
-            }
+            // Priority dot
+            Circle()
+                .fill(priorityColor(item.priority))
+                .frame(width: 8, height: 8)
+
+            // Title
+            Text(item.title)
+                .font(.body)
 
             Spacer()
 
-            // Edit hint
-            if editingID != item.id {
-                Button {
-                    editingID = item.id
-                } label: {
-                    Image(systemName: "pencil")
-                        .font(.caption)
-                        .foregroundStyle(.secondary.opacity(0.5))
-                }
-                .buttonStyle(.plain)
+            // Category tag
+            if let cat = store.category(for: item) {
+                Text(cat.name)
+                    .font(.caption2)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color(hex: cat.color).opacity(0.15))
+                    .clipShape(Capsule())
+            }
+
+            // Due date
+            if let label = item.dueDateLabel {
+                Text(label)
+                    .font(.caption)
+                    .foregroundStyle(item.isOverdue ? .red : .secondary)
             }
         }
         .padding(.vertical, 2)
     }
 
-    // MARK: - Add Bar
+    // MARK: - Empty State
 
-    private var addBar: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "plus.circle.fill")
-                .foregroundStyle(.tint)
-                .font(.title3)
+    private var emptyState: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "tray")
+                .font(.largeTitle)
+                .foregroundStyle(.secondary)
+            Text("暂无待办")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
 
-            TextField("添加新待办…", text: $newTodoText)
-                .textFieldStyle(.plain)
-                .onSubmit { addTodo() }
+    // MARK: - Helpers
 
-            Button("添加") {
-                addTodo()
+    private var filteredItems: [TodoItem] {
+        store.items.filter { item in
+            if let filterID = filterCategoryID {
+                // Special UUID for "uncategorized"
+                if filterID == UUID(uuidString: "00000000-0000-0000-0000-000000000000") {
+                    return item.categoryID == nil
+                }
+                return item.categoryID == filterID
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(newTodoText.trimmingCharacters(in: .whitespaces).isEmpty)
+            return true
         }
     }
 
     private func addTodo() {
-        store.add(title: newTodoText)
+        store.add(title: newTodoText, categoryID: selectedCategoryID, dueDate: hasDueDate ? dueDate : nil, priority: selectedPriority)
         newTodoText = ""
+    }
+
+    private func priorityColor(_ priority: Priority) -> Color {
+        switch priority {
+        case .high: return .red
+        case .medium: return .orange
+        case .low: return .green
+        }
     }
 }

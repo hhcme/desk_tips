@@ -11,36 +11,69 @@ struct TodoItemTests {
         #expect(item.title == "Buy milk")
         #expect(item.isCompleted == false)
         #expect(item.completedAt == nil)
+        #expect(item.categoryID == nil)
+        #expect(item.dueDate == nil)
+        #expect(item.priority == .medium)
     }
 
-    @Test("Init with isCompleted sets completedAt")
-    func initCompleted() {
-        let now = Date()
-        let item = TodoItem(title: "Done", isCompleted: true, createdAt: now)
-        #expect(item.isCompleted == true)
-        #expect(item.completedAt == now)
+    @Test("Init with all fields")
+    func initFull() {
+        let catID = UUID()
+        let due = Date()
+        let item = TodoItem(title: "Full", categoryID: catID, dueDate: due, priority: .high)
+        #expect(item.categoryID == catID)
+        #expect(item.dueDate == due)
+        #expect(item.priority == .high)
     }
 
     @Test("Toggle flips completion state")
     func toggle() {
         var item = TodoItem(title: "Test")
         #expect(item.isCompleted == false)
-
         item.toggle()
         #expect(item.isCompleted == true)
         #expect(item.completedAt != nil)
-
         item.toggle()
         #expect(item.isCompleted == false)
         #expect(item.completedAt == nil)
     }
 
-    @Test("Codable round-trip preserves data")
+    @Test("isOverdue")
+    func isOverdue() {
+        let past = TodoItem(title: "Past", dueDate: Date().addingTimeInterval(-3600))
+        #expect(past.isOverdue == true)
+        let future = TodoItem(title: "Future", dueDate: Date().addingTimeInterval(3600))
+        #expect(future.isOverdue == false)
+        let noDate = TodoItem(title: "No date")
+        #expect(noDate.isOverdue == false)
+        var completedPast = TodoItem(title: "Done past", dueDate: Date().addingTimeInterval(-3600))
+        completedPast.toggle()
+        #expect(completedPast.isOverdue == false)
+    }
+
+    @Test("dueDateLabel")
+    func dueDateLabel() {
+        let noDate = TodoItem(title: "No date")
+        #expect(noDate.dueDateLabel == nil)
+        let past = TodoItem(title: "Past", dueDate: Date().addingTimeInterval(-3600))
+        #expect(past.dueDateLabel == "已过期")
+    }
+
+    @Test("Priority comparison")
+    func priorityCompare() {
+        #expect(Priority.low < Priority.medium)
+        #expect(Priority.medium < Priority.high)
+    }
+
+    @Test("Codable round-trip preserves new fields")
     func codableRoundTrip() throws {
-        let original = TodoItem(title: "Round trip", isCompleted: true)
+        let catID = UUID()
+        let original = TodoItem(title: "Round trip", categoryID: catID, dueDate: Date(timeIntervalSince1970: 0), priority: .high)
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(TodoItem.self, from: data)
         #expect(decoded == original)
+        #expect(decoded.categoryID == catID)
+        #expect(decoded.priority == .high)
     }
 
     @Test("Equatable works correctly")

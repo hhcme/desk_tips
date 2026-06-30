@@ -22,6 +22,11 @@ struct MainSettingsView: View {
 
                 Divider()
 
+                // Notifications
+                notificationSection
+
+                Divider()
+
                 // About
                 aboutSection
             }
@@ -102,6 +107,38 @@ struct MainSettingsView: View {
         }
         .onAppear {
             launchAtLogin = SMAppService.mainApp.status == .enabled
+        }
+    }
+
+    // MARK: - Notification Section
+
+    private let reminderOptions: [(String, TimeInterval)] = [
+        ("不提醒", 0),
+        ("5 分钟前", 300),
+        ("15 分钟前", 900),
+        ("30 分钟前", 1800),
+        ("1 小时前", 3600),
+        ("1 天前", 86400),
+    ]
+
+    private var notificationSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("通知提醒", systemImage: "bell")
+                .font(.headline)
+
+            HStack {
+                Text("默认提醒时间")
+                    .frame(width: 100, alignment: .trailing)
+                Picker("", selection: Binding(
+                    get: { settingsStore.settings.defaultReminderOffset },
+                    set: { settingsStore.updateDefaultReminderOffset($0) }
+                )) {
+                    ForEach(reminderOptions, id: \.1) { option in
+                        Text(option.0).tag(option.1)
+                    }
+                }
+                .frame(width: 140)
+            }
         }
     }
 

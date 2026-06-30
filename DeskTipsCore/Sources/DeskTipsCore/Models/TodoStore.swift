@@ -1,15 +1,12 @@
 import Foundation
 import SwiftUI
 
-/// Central observable store for todo items. Auto-saves on every mutation.
-/// Active items in `items`, completed items archived in `completedItems`.
+/// Central observable store for todo items and categories. Auto-saves on every mutation.
 @MainActor
 public final class TodoStore: ObservableObject {
-    /// All todo items (including completed ones that haven't been cleaned up yet).
     @Published public private(set) var items: [TodoItem] = []
-
-    /// Completed items archived by cleanup/completion.
     @Published public private(set) var completedItems: [TodoItem] = []
+    @Published public private(set) var categories: [Category] = []
 
     private let persistence: PersistenceService
 
@@ -18,26 +15,29 @@ public final class TodoStore: ObservableObject {
         let state = persistence.loadState()
         self.items = state.items
         self.completedItems = state.completedItems
+        self.categories = state.categories
     }
 
-    // MARK: - Active Item Mutations
+    // MARK: - Todo Mutations
 
-    public func add(title: String) {
+    public func add(
+        title: String,
+        categoryID: UUID? = nil,
+        dueDate: Date? = nil,
+        priority: Priority = .medium
+    ) {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        items.append(TodoItem(title: trimmed))
+        items.append(TodoItem(title: trimmed, categoryID: categoryID, dueDate: dueDate, priority: priority))
         save()
     }
 
-    /// Toggle completion state IN PLACE — does NOT move to history.
-    /// Completed items stay in `items` with isCompleted=true until cleaned up.
     public func toggle(_ item: TodoItem) {
         guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
         items[index].toggle()
         save()
     }
 
-    /// Restore a completed item back to active (un-complete).
     public func uncomplete(_ item: TodoItem) {
         guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
         if items[index].isCompleted {
@@ -69,7 +69,24 @@ public final class TodoStore: ObservableObject {
         save()
     }
 
-    /// Move all completed items from `items` to `completedItems` (archive to history).
+    public func updateCategory(id: UUID, categoryID: UUID?) {
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        items[index].categoryID = categoryID
+        save()
+    }
+
+    public func updateDueDate(id: UUID, dueDate: Date?) {
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        items[index].dueDate = dueDate
+        save()
+    }
+
+    public func updatePriority(id: UUID, priority: Priority) {
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        items[index].priority = priority
+        save()
+    }
+
     public func clearCompleted() {
         let completed = items.filter { $0.isCompleted }
         guard !completed.isEmpty else { return }
@@ -78,12 +95,84 @@ public final class TodoStore: ObservableObject {
         save()
     }
 
-    // MARK: - History Mutations
+    // MARK: - Category Mutations
+
+    public func addCategory(name: String, color: String, iconName: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let order = (categories.map(\.sortOrder).max() ?? -1) + 1
+        categories.append(Category(name: trimmed, color: color, iconName: iconName, sortOrder: order))
+        save()
+    }
+
+    public func updateCategory(id: UUID, name: String, color: String, iconName: String) {
+        guard let index = categories.firstIndex(where: { $0.id == id }) else { return }
+        categories[index].name = name
+        categories[index].color = color
+        categories[index].iconName = iconName
+        save()
+    }
+
+    public func removeCategory(id: UUID) {
+        categories.removeAll { $0.id == id }
+        // Unset categoryID for items in this category
+        for i in items.indices where items[i].categoryID == id {
+            items[i].categoryID = nil
+        }
+        for i in completedItems.indices where completedItems[i].categoryID == id {
+            completedItems[i].categoryID = nil
+        }
+        save()
+    }
+
+    public func moveCategory(from source: IndexSet, to destination: Int) {
+        categories.move(fromOffsets: source, toOffset: destination)
+        for i in categories.indices { categories[i].sortOrder = i }
+        save()
+    }
+
+    // MARK: - Queries
+
+    public func itemsForCategory(_ categoryID: UUID?) -> [TodoItem] {
+        items.filter { $0.categoryID == categoryID }
+    }
+
+    public var uncategorizedItems: [TodoItem] {
+        items.filter { $0.categoryID == nil }
+    }
+
+    public func category(for item: TodoItem) -> Category? {
+        guard let id = item.categoryID else { return nil }
+        return categories.first { $0.id == id }
+    }
+
+    public var activeCount: Int {
+        items.filter { !$0.isCompleted }.count
+    }
+
+    public var completedCount: Int {
+        items.filter { $0.isCompleted }.count
+    }
+
+    public var overdueItems: [TodoItem] {
+        items.filter { $0.isOverdue }
+    }
+
+    /// Items due within the given time interval from now.
+    public func itemsDueSoon(within interval: TimeInterval) -> [TodoItem] {
+        let deadline = Date().addingTimeInterval(interval)
+        return items.filter { item in
+            guard let due = item.dueDate, !item.isCompleted else { return false }
+            return due <= deadline && due >= Date()
+        }
+    }
+
+    // MARK: - History
 
     public func restoreFromHistory(id: UUID) {
         guard let index = completedItems.firstIndex(where: { $0.id == id }) else { return }
         var restored = completedItems[index]
-        restored.toggle()  // sets isCompleted=false, completedAt=nil
+        restored.toggle()
         completedItems.remove(at: index)
         items.append(restored)
         save()
@@ -99,9 +188,6 @@ public final class TodoStore: ObservableObject {
         save()
     }
 
-    // MARK: - History Queries
-
-    /// Completed items grouped by date (day), sorted newest first.
     public var historyByDate: [(date: Date, items: [TodoItem])] {
         let calendar = Calendar.current
         let grouped = Dictionary(grouping: completedItems) { item -> Date in
@@ -114,19 +200,9 @@ public final class TodoStore: ObservableObject {
             .sorted { $0.date > $1.date }
     }
 
-    /// Number of active (non-completed) items.
-    public var activeCount: Int {
-        items.filter { !$0.isCompleted }.count
-    }
-
-    /// Number of completed items still in the list (not yet cleaned up).
-    public var completedCount: Int {
-        items.filter { $0.isCompleted }.count
-    }
-
     // MARK: - Persistence
 
     private func save() {
-        persistence.saveState(TodoStoreState(items: items, completedItems: completedItems))
+        persistence.saveState(TodoStoreState(items: items, completedItems: completedItems, categories: categories))
     }
 }

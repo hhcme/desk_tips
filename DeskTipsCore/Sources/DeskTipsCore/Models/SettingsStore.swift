@@ -45,6 +45,11 @@ public final class SettingsStore: ObservableObject {
         save()
     }
 
+    public func updateDefaultReminderOffset(_ offset: TimeInterval) {
+        settings.defaultReminderOffset = max(offset, 0)
+        save()
+    }
+
     private func save() {
         persistence.save(settings)
     }

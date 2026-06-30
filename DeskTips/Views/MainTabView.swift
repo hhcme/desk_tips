@@ -12,6 +12,9 @@ struct MainTabView: View {
             TodoListView(store: store)
                 .tabItem { Label("待办", systemImage: "checklist") }
 
+            CategoryManageView(store: store)
+                .tabItem { Label("分类", systemImage: "folder") }
+
             HistoryView(store: store)
                 .tabItem { Label("历史", systemImage: "clock.arrow.circlepath") }
 

@@ -17,18 +17,22 @@ public struct OverlaySettings: Codable, Sendable, Equatable {
     public var isVisible: Bool
     /// Custom title for the overlay window.
     public var overlayTitle: String
+    /// Default reminder offset in seconds before due date. 0 = no reminder.
+    public var defaultReminderOffset: TimeInterval
 
     public init(
         displayMode: OverlayDisplayMode = .glass,
         glassIntensity: Double = 0.7,
         transparentOpacity: Double = 0.85,
         isVisible: Bool = true,
-        overlayTitle: String = "DeskTips"
+        overlayTitle: String = "DeskTips",
+        defaultReminderOffset: TimeInterval = 900
     ) {
         self.displayMode = displayMode
         self.glassIntensity = glassIntensity
         self.transparentOpacity = transparentOpacity
         self.isVisible = isVisible
         self.overlayTitle = overlayTitle
+        self.defaultReminderOffset = defaultReminderOffset
     }
 }

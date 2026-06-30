@@ -1,13 +1,19 @@
 import Foundation
 
-/// Bundles active and completed items for atomic persistence.
+/// Bundles active items, completed items, and categories for atomic persistence.
 public struct TodoStoreState: Codable, Sendable {
     public var items: [TodoItem]
     public var completedItems: [TodoItem]
+    public var categories: [Category]
 
-    public init(items: [TodoItem] = [], completedItems: [TodoItem] = []) {
+    public init(
+        items: [TodoItem] = [],
+        completedItems: [TodoItem] = [],
+        categories: [Category] = []
+    ) {
         self.items = items
         self.completedItems = completedItems
+        self.categories = categories
     }
 }
 
@@ -32,7 +38,6 @@ public extension PersistenceService {
 }
 
 /// UserDefaults-backed persistence using JSON encoding.
-/// UserDefaults is thread-safe; @unchecked Sendable is safe here.
 public struct UserDefaultsPersistence: PersistenceService, @unchecked Sendable {
     private let key = "com.desktips.todos"
     private let stateKey = "com.desktips.storeState"
@@ -45,9 +50,7 @@ public struct UserDefaultsPersistence: PersistenceService, @unchecked Sendable {
     public func load() -> [TodoItem] {
         guard let data = defaults.data(forKey: key),
               let items = try? JSONDecoder().decode([TodoItem].self, from: data)
-        else {
-            return []
-        }
+        else { return [] }
         return items
     }
 
@@ -57,13 +60,19 @@ public struct UserDefaultsPersistence: PersistenceService, @unchecked Sendable {
     }
 
     public func loadState() -> TodoStoreState {
-        // Try new state format first, fall back to legacy
         if let data = defaults.data(forKey: stateKey),
            let state = try? JSONDecoder().decode(TodoStoreState.self, from: data) {
-            return state
+            // Auto-migrate: add default categories if empty
+            var migrated = state
+            if migrated.categories.isEmpty {
+                migrated.categories = defaultCategories
+            }
+            return migrated
         }
         // Migrate from legacy format
-        return TodoStoreState(items: load())
+        var legacy = TodoStoreState(items: load())
+        legacy.categories = defaultCategories
+        return legacy
     }
 
     public func saveState(_ state: TodoStoreState) {

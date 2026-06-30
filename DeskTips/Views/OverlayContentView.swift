@@ -2,40 +2,34 @@ import SwiftUI
 import AppKit
 import DeskTipsCore
 
-/// Floating overlay content with lock/edit dual mode.
+/// Floating overlay content — simplified view-only list with lock/edit dual mode.
 struct OverlayContentView: View {
     @ObservedObject var store: TodoStore
     @ObservedObject var settingsStore: SettingsStore
     let onEditModeChanged: (Bool) -> Void
 
     @State private var isEditMode = false
-    @State private var newTodoText = ""
-    @State private var titleText = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Drag handle (edit mode only)
             // Drag handle — always visible
             dragHandle
 
-            // Header with title
+            // Header
             header
 
             Divider()
                 .padding(.horizontal, 8)
 
-            // Add input (edit mode only, animated)
-            if isEditMode {
-                addBar
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
-
-            // Todo items
-            if store.items.isEmpty && !isEditMode {
+            // Todo list grouped by category
+            if store.items.isEmpty {
                 emptyState
             } else {
-                todoItems
+                categoryGroupedList
             }
+
+            // Footer: completed/total count
+            footer
         }
         .frame(width: 260)
         .fixedSize(horizontal: false, vertical: true)
@@ -44,13 +38,10 @@ struct OverlayContentView: View {
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: isEditMode)
         .onChange(of: isEditMode) { _, newValue in
             onEditModeChanged(newValue)
-            if newValue {
-                titleText = settingsStore.settings.overlayTitle
-            }
         }
     }
 
-    // MARK: - Drag Handle (edit mode, AppKit native drag)
+    // MARK: - Drag Handle
 
     private var dragHandle: some View {
         DragHandleView()
@@ -62,40 +53,20 @@ struct OverlayContentView: View {
 
     private var header: some View {
         HStack(spacing: 6) {
-            // Edit mode: title is editable
-            if isEditMode {
-                TextField("", text: $titleText)
-                    .textFieldStyle(.plain)
-                    .font(.caption.weight(.semibold))
-                    .frame(maxWidth: 120)
-                    .onSubmit {
-                        settingsStore.updateOverlayTitle(titleText)
-                    }
-            } else {
-                Text(settingsStore.settings.overlayTitle)
-                    .font(.caption.weight(.semibold))
-            }
+            Text(settingsStore.settings.overlayTitle)
+                .font(.caption.weight(.semibold))
 
             Spacer()
 
-            // Display: completed/total
             let completed = store.items.filter { $0.isCompleted }.count
             let total = store.items.count
             Text("\(completed)/\(total)")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
-            // Edit/Lock toggle button
+            // Lock/Unlock toggle
             Button {
-                withAnimation {
-                    if isEditMode {
-                        let trimmed = titleText.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !trimmed.isEmpty && trimmed != settingsStore.settings.overlayTitle {
-                            settingsStore.updateOverlayTitle(titleText)
-                        }
-                    }
-                    isEditMode.toggle()
-                }
+                withAnimation { isEditMode.toggle() }
             } label: {
                 Image(systemName: isEditMode ? "lock.open.fill" : "lock.fill")
                     .font(.system(size: 11, weight: .medium))
@@ -110,53 +81,47 @@ struct OverlayContentView: View {
         .padding(.bottom, 6)
     }
 
-    // MARK: - Add Bar (edit mode)
+    // MARK: - Category Grouped List
 
-    private var addBar: some View {
-        HStack(spacing: 6) {
-            TextField("添加待办…", text: $newTodoText)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12))
-                .onSubmit {
-                    addTodo()
+    private var categoryGroupedList: some View {
+        VStack(spacing: 0) {
+            ForEach(groupedItems, id: \.category?.id) { group in
+                // Category header
+                categoryHeader(group.category, count: group.items.count)
+
+                // Items in this category
+                ForEach(group.items) { item in
+                    todoRow(item)
                 }
 
-            if !newTodoText.isEmpty {
-                Button {
-                    newTodoText = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
+                Divider().padding(.horizontal, 12)
             }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func categoryHeader(_ category: DeskTipsCore.Category?, count: Int) -> some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(Color(hex: category?.color ?? "#888888"))
+                .frame(width: 8, height: 8)
+            Text(category?.name ?? "其他")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text("\(count)")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(.quaternary.opacity(0.3))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
+        .padding(.top, 6)
+        .padding(.bottom, 2)
     }
 
-    // MARK: - Todo Items
-
-    private var todoItems: some View {
-        VStack(spacing: 0) {
-            ForEach(store.items) { item in
-                todoRow(item)
-                if item.id != store.items.last?.id {
-                    Divider()
-                        .padding(.horizontal, 12)
-                }
-            }
-        }
-        .padding(.vertical, 4)
-    }
+    // MARK: - Todo Row
 
     private func todoRow(_ item: TodoItem) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             // Checkbox
             Button {
                 store.toggle(item)
@@ -168,29 +133,37 @@ struct OverlayContentView: View {
             .buttonStyle(.plain)
             .disabled(!isEditMode)
 
+            // Priority dot
+            Circle()
+                .fill(priorityColor(item.priority))
+                .frame(width: 6, height: 6)
+
             // Title
             Text(item.title)
                 .font(.system(size: 13))
                 .strikethrough(item.isCompleted)
-                .foregroundStyle(item.isCompleted ? .secondary : .primary)
+                .foregroundStyle(item.isOverdue ? .red : (item.isCompleted ? .secondary : .primary))
                 .lineLimit(2)
 
             Spacer()
 
-            // More menu (edit mode only)
+            // Due date label
+            if let label = item.dueDateLabel {
+                Text(label)
+                    .font(.system(size: 10))
+                    .foregroundStyle(item.isOverdue ? .red : .secondary)
+            }
+
+            // More menu (edit mode)
             if isEditMode {
                 Menu {
                     Button {
                         store.toggle(item)
                     } label: {
-                        Label(
-                            item.isCompleted ? "取消完成" : "标记完成",
-                            systemImage: item.isCompleted ? "arrow.uturn.backward" : "checkmark"
-                        )
+                        Label(item.isCompleted ? "取消完成" : "标记完成",
+                              systemImage: item.isCompleted ? "arrow.uturn.backward" : "checkmark")
                     }
-
                     Divider()
-
                     Button(role: .destructive) {
                         store.remove(id: item.id)
                     } label: {
@@ -209,8 +182,26 @@ struct OverlayContentView: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 5)
+        .padding(.vertical, 4)
         .contentShape(Rectangle())
+    }
+
+    // MARK: - Footer
+
+    private var footer: some View {
+        HStack {
+            Spacer()
+            if store.completedCount > 0 && isEditMode {
+                Button("清理已完成") {
+                    store.clearCompleted()
+                }
+                .font(.system(size: 10))
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.bottom, 6)
     }
 
     // MARK: - Empty State
@@ -245,27 +236,56 @@ struct OverlayContentView: View {
         }
     }
 
-    // MARK: - Actions
+    // MARK: - Helpers
 
-    private func addTodo() {
-        store.add(title: newTodoText)
-        newTodoText = ""
+    /// Group items by category, sorted by category sortOrder.
+    private var groupedItems: [(category: DeskTipsCore.Category?, items: [TodoItem])] {
+        let sorted = store.categories.sorted { $0.sortOrder < $1.sortOrder }
+        var result: [(category: DeskTipsCore.Category?, items: [TodoItem])] = []
+
+        for cat in sorted {
+            let catItems = store.items.filter { $0.categoryID == cat.id }
+            if !catItems.isEmpty {
+                result.append((category: cat, items: catItems))
+            }
+        }
+
+        let uncategorized = store.items.filter { $0.categoryID == nil }
+        if !uncategorized.isEmpty {
+            result.append((category: nil, items: uncategorized))
+        }
+
+        return result
     }
 
-    /// Find the overlay NSPanel by identifier.
-    private func findOverlayWindow() -> NSPanel? {
-        NSApp.windows.first(where: { $0.identifier?.rawValue == "DeskTipsOverlay" }) as? NSPanel
+    private func priorityColor(_ priority: Priority) -> Color {
+        switch priority {
+        case .high: return .red
+        case .medium: return .orange
+        case .low: return .green
+        }
     }
 }
 
-// MARK: - AppKit Drag Handle (full-width, native performDrag + cursor + highlight)
+// MARK: - Color from Hex
+
+extension Color {
+    init(hex: String) {
+        let hex = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        let scanner = Scanner(string: hex)
+        var rgb: UInt64 = 0
+        scanner.scanHexInt64(&rgb)
+        let r = Double((rgb >> 16) & 0xFF) / 255
+        let g = Double((rgb >> 8) & 0xFF) / 255
+        let b = Double(rgb & 0xFF) / 255
+        self.init(red: r, green: g, blue: b)
+    }
+}
+
+// MARK: - AppKit Drag Handle
 
 private struct DragHandleView: NSViewRepresentable {
-    func makeNSView(context: Context) -> HandleView {
-        let view = HandleView()
-        return view
-    }
-
+    func makeNSView(context: Context) -> HandleView { HandleView() }
     func updateNSView(_ nsView: HandleView, context: Context) {}
 
     class HandleView: NSView {
@@ -281,16 +301,8 @@ private struct DragHandleView: NSViewRepresentable {
 
         required init?(coder: NSCoder) { fatalError() }
 
-        override var isFlipped: Bool { true }
-
         private func setupTracking() {
-            let trackingArea = NSTrackingArea(
-                rect: .zero,
-                options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect, .mouseMoved],
-                owner: self,
-                userInfo: nil
-            )
-            addTrackingArea(trackingArea)
+            addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect, .mouseMoved], owner: self, userInfo: nil))
         }
 
         private func addDragIndicator() {
@@ -308,34 +320,23 @@ private struct DragHandleView: NSViewRepresentable {
             ])
         }
 
-        // Hover highlight
         override func mouseEntered(with event: NSEvent) {
             isHovering = true
             NSCursor.openHand.push()
-            NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.15
-                self.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.08).cgColor
-            }
+            NSAnimationContext.runAnimationGroup { $0.duration = 0.15; self.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.08).cgColor }
         }
 
         override func mouseExited(with event: NSEvent) {
             isHovering = false
             NSCursor.pop()
-            NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.15
-                self.layer?.backgroundColor = NSColor.clear.cgColor
-            }
+            NSAnimationContext.runAnimationGroup { $0.duration = 0.15; self.layer?.backgroundColor = NSColor.clear.cgColor }
         }
 
-        // Native drag
         override func mouseDown(with event: NSEvent) {
             NSCursor.closedHand.push()
             window?.performDrag(with: event)
             NSCursor.closedHand.pop()
-            if !isHovering {
-                // Reset background if mouse ended outside
-                layer?.backgroundColor = NSColor.clear.cgColor
-            }
+            if !isHovering { layer?.backgroundColor = NSColor.clear.cgColor }
         }
 
         override var acceptsFirstResponder: Bool { false }

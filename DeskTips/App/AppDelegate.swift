@@ -12,21 +12,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
-        // Data stores
         todoStore = TodoStore()
         settingsStore = SettingsStore()
 
-        // Overlay (floating window on desktop)
+        // Request notification permission and check overdue
+        Task {
+            _ = await NotificationManager.shared.requestPermission()
+            NotificationManager.shared.checkOverdueItems(store: todoStore)
+            NotificationManager.shared.rescheduleAll(
+                store: todoStore,
+                reminderOffset: settingsStore.settings.defaultReminderOffset
+            )
+        }
+
         overlayController = OverlayWindowController(store: todoStore, settingsStore: settingsStore)
 
-        // Main window (created but not shown)
         mainWindowController = MainWindowController(
             store: todoStore,
             settingsStore: settingsStore,
             overlayController: overlayController
         )
 
-        // Menu bar icon + popover
         statusBarController = StatusBarController(
             store: todoStore,
             settingsStore: settingsStore,
@@ -34,7 +40,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             mainWindowController: mainWindowController
         )
 
-        // Show overlay if settings say so
         if settingsStore.settings.isVisible {
             overlayController.showWindow(nil)
         }

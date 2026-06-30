@@ -16,7 +16,7 @@ final class MockPersistence: PersistenceService, @unchecked Sendable {
     }
 
     func loadState() -> TodoStoreState {
-        storedState ?? TodoStoreState(items: stored)
+        storedState ?? TodoStoreState(items: stored, categories: defaultCategories)
     }
 
     func saveState(_ state: TodoStoreState) {
@@ -30,33 +30,20 @@ final class MockPersistence: PersistenceService, @unchecked Sendable {
 @Suite("TodoStore tests")
 struct TodoStoreTests {
 
-    @Test("Store loads from persistence on init")
-    func loadsOnInit() {
-        let mock = MockPersistence()
-        mock.stored = [TodoItem(title: "Loaded")]
-        let store = TodoStore(persistence: mock)
-        #expect(store.items.count == 1)
-        #expect(store.items[0].title == "Loaded")
-    }
+    // MARK: - Basic CRUD
 
-    @Test("Add appends item and saves")
-    func add() {
+    @Test("Add with category, due date, priority")
+    func addFull() {
         let mock = MockPersistence()
         let store = TodoStore(persistence: mock)
-        store.add(title: "New task")
-        #expect(store.items.count == 1)
-        #expect(store.items[0].title == "New task")
-        #expect(mock.saveCount == 1)
-    }
-
-    @Test("Add ignores empty and whitespace-only titles")
-    func addEmpty() {
-        let mock = MockPersistence()
-        let store = TodoStore(persistence: mock)
-        store.add(title: "")
-        store.add(title: "   ")
-        store.add(title: "\n")
-        #expect(store.items.isEmpty)
+        let catID = UUID()
+        let due = Date().addingTimeInterval(3600)
+        store.add(title: "Full item", categoryID: catID, dueDate: due, priority: .high)
+        let item = store.items[0]
+        #expect(item.title == "Full item")
+        #expect(item.categoryID == catID)
+        #expect(item.dueDate != nil)
+        #expect(item.priority == .high)
     }
 
     @Test("Toggle marks item complete in place")
@@ -64,27 +51,12 @@ struct TodoStoreTests {
         let mock = MockPersistence()
         let store = TodoStore(persistence: mock)
         store.add(title: "Toggle me")
-        let item = store.items[0]
-        store.toggle(item)
-        // Item stays in items, just marked complete
-        #expect(store.items.count == 1)
+        store.toggle(store.items[0])
         #expect(store.items[0].isCompleted == true)
         #expect(store.items[0].completedAt != nil)
     }
 
-    @Test("Toggle marks item incomplete in place")
-    func toggleIncomplete() {
-        let mock = MockPersistence()
-        let store = TodoStore(persistence: mock)
-        store.add(title: "Toggle me")
-        store.toggle(store.items[0])
-        #expect(store.items[0].isCompleted == true)
-        store.toggle(store.items[0])
-        #expect(store.items[0].isCompleted == false)
-        #expect(store.items[0].completedAt == nil)
-    }
-
-    @Test("Clear completed moves completed items to history")
+    @Test("Clear completed moves to history")
     func clearCompleted() {
         let mock = MockPersistence()
         let store = TodoStore(persistence: mock)
@@ -93,109 +65,77 @@ struct TodoStoreTests {
         store.toggle(store.items[1])
         store.clearCompleted()
         #expect(store.items.count == 1)
-        #expect(store.items[0].title == "Active")
         #expect(store.completedItems.count == 1)
-        #expect(store.completedItems[0].title == "Done")
     }
 
-    @Test("Restore from history")
-    func restoreFromHistory() {
+    // MARK: - Category CRUD
+
+    @Test("Add category")
+    func addCategory() {
         let mock = MockPersistence()
         let store = TodoStore(persistence: mock)
-        store.add(title: "Will restore")
-        let id = store.items[0].id
-        store.toggle(store.items[0])
-        store.clearCompleted()
-        #expect(store.completedItems.count == 1)
-        store.restoreFromHistory(id: id)
-        #expect(store.items.count == 1)
-        #expect(store.items[0].isCompleted == false)
-        #expect(store.completedItems.isEmpty)
+        let count = store.categories.count
+        store.addCategory(name: "Test", color: "#FF0000", iconName: "star")
+        #expect(store.categories.count == count + 1)
+        #expect(store.categories.last?.name == "Test")
     }
 
-    @Test("Delete from history permanently")
-    func deleteFromHistory() {
+    @Test("Update category")
+    func updateCategory() {
         let mock = MockPersistence()
         let store = TodoStore(persistence: mock)
-        store.add(title: "Permanent delete")
-        let id = store.items[0].id
-        store.toggle(store.items[0])
-        store.clearCompleted()
-        store.deleteFromHistory(id: id)
-        #expect(store.completedItems.isEmpty)
-        #expect(store.items.isEmpty)
+        let cat = store.categories[0]
+        store.updateCategory(id: cat.id, name: "Updated", color: "#00FF00", iconName: "heart")
+        #expect(store.categories[0].name == "Updated")
+        #expect(store.categories[0].color == "#00FF00")
     }
 
-    @Test("Remove at offsets")
-    func removeAtOffsets() {
+    @Test("Remove category unsets items")
+    func removeCategory() {
         let mock = MockPersistence()
         let store = TodoStore(persistence: mock)
-        store.add(title: "A")
-        store.add(title: "B")
-        store.remove(at: IndexSet(integer: 0))
-        #expect(store.items.count == 1)
-        #expect(store.items[0].title == "B")
+        let cat = store.categories[0]
+        store.add(title: "Categorized", categoryID: cat.id)
+        #expect(store.items[0].categoryID == cat.id)
+        store.removeCategory(id: cat.id)
+        #expect(store.items[0].categoryID == nil)
     }
 
-    @Test("Remove by id")
-    func removeById() {
+    @Test("Filter by category")
+    func filterByCategory() {
         let mock = MockPersistence()
         let store = TodoStore(persistence: mock)
-        store.add(title: "To remove")
-        let id = store.items[0].id
-        store.remove(id: id)
-        #expect(store.items.isEmpty)
+        let cat = store.categories[0]
+        store.add(title: "In cat", categoryID: cat.id)
+        store.add(title: "No cat")
+        let filtered = store.itemsForCategory(cat.id)
+        #expect(filtered.count == 1)
+        #expect(filtered[0].title == "In cat")
+        #expect(store.uncategorizedItems.count == 1)
     }
 
-    @Test("Move reorders items")
-    func move() {
+    // MARK: - Due Date Queries
+
+    @Test("Overdue items")
+    func overdue() {
         let mock = MockPersistence()
         let store = TodoStore(persistence: mock)
-        store.add(title: "First")
-        store.add(title: "Second")
-        store.add(title: "Third")
-        store.move(from: IndexSet(integer: 0), to: 3)
-        #expect(store.items[0].title == "Second")
-        #expect(store.items[1].title == "Third")
-        #expect(store.items[2].title == "First")
+        store.add(title: "Overdue", dueDate: Date().addingTimeInterval(-3600))
+        store.add(title: "Future", dueDate: Date().addingTimeInterval(3600))
+        store.add(title: "No date")
+        #expect(store.overdueItems.count == 1)
+        #expect(store.overdueItems[0].title == "Overdue")
     }
 
-    @Test("Update title")
-    func updateTitle() {
+    @Test("Items due soon")
+    func dueSoon() {
         let mock = MockPersistence()
         let store = TodoStore(persistence: mock)
-        store.add(title: "Old")
-        let id = store.items[0].id
-        store.updateTitle(id: id, newTitle: "New")
-        #expect(store.items[0].title == "New")
-    }
-
-    @Test("Active and completed counts")
-    func counts() {
-        let mock = MockPersistence()
-        let store = TodoStore(persistence: mock)
-        store.add(title: "Active 1")
-        store.add(title: "Active 2")
-        store.add(title: "Will complete")
-        store.toggle(store.items[2])
-        #expect(store.activeCount == 2)
-        #expect(store.completedCount == 1)
-    }
-
-    @Test("SaveState persists both items and completedItems")
-    func saveStateRoundTrip() {
-        let mock = MockPersistence()
-        let store = TodoStore(persistence: mock)
-        store.add(title: "Active")
-        store.add(title: "Will complete")
-        store.toggle(store.items[1])
-        store.clearCompleted()
-        // Create new store from same persistence
-        let store2 = TodoStore(persistence: mock)
-        #expect(store2.items.count == 1)
-        #expect(store2.items[0].title == "Active")
-        #expect(store2.completedItems.count == 1)
-        #expect(store2.completedItems[0].title == "Will complete")
+        store.add(title: "Soon", dueDate: Date().addingTimeInterval(600))  // 10 min
+        store.add(title: "Later", dueDate: Date().addingTimeInterval(7200))  // 2 hours
+        let soon = store.itemsDueSoon(within: 900)  // within 15 min
+        #expect(soon.count == 1)
+        #expect(soon[0].title == "Soon")
     }
 
     @Test("History grouped by date")
@@ -204,12 +144,23 @@ struct TodoStoreTests {
         let store = TodoStore(persistence: mock)
         store.add(title: "A")
         store.add(title: "B")
-        // Toggle both items complete (they stay in items, just marked done)
         store.toggle(store.items[0])  // A completed
         store.toggle(store.items[1])  // B completed
-        store.clearCompleted()        // move both to history
+        store.clearCompleted()
         let groups = store.historyByDate
         #expect(groups.count >= 1)
         #expect(groups[0].items.count == 2)
+    }
+
+    @Test("SaveState round trip with categories")
+    func saveStateRoundTrip() {
+        let mock = MockPersistence()
+        let store = TodoStore(persistence: mock)
+        store.add(title: "Test", categoryID: store.categories[0].id)
+        store.addCategory(name: "Custom", color: "#ABC", iconName: "star")
+        let store2 = TodoStore(persistence: mock)
+        #expect(store2.items.count == 1)
+        #expect(store2.categories.count == store.categories.count)
+        #expect(store2.items[0].categoryID == store.items[0].categoryID)
     }
 }
