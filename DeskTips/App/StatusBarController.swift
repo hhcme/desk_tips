@@ -47,7 +47,9 @@ final class StatusBarController {
 
         // Now safe to use self
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "checklist.checked", accessibilityDescription: "DeskTips")
+            button.image = Self.makeStatusBarImage()
+            button.imagePosition = .imageOnly
+            button.imageScaling = .scaleProportionallyDown
             button.action = #selector(togglePopover)
             button.target = self
         }
@@ -82,5 +84,15 @@ final class StatusBarController {
         if popover.isShown {
             popover.performClose(nil)
         }
+    }
+
+    private static func makeStatusBarImage() -> NSImage? {
+        let image = NSImage(named: "MenuBarIcon")
+            ?? NSImage(systemSymbolName: "checkmark.circle", accessibilityDescription: "DeskTips")
+
+        image?.isTemplate = true
+        image?.size = NSSize(width: 18, height: 18)
+        image?.accessibilityDescription = "DeskTips"
+        return image
     }
 }

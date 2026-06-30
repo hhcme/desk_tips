@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">DeskTips logo</title>
+  <desc id="desc">A clean blue circular DeskTips mark with a lightweight white completion stroke.</desc>
+  <defs>
+    <radialGradient id="badge" cx="32%" cy="24%" r="76%">
+      <stop offset="0" stop-color="#8BEAFF"/>
+      <stop offset="0.44" stop-color="#23B7FF"/>
+      <stop offset="0.78" stop-color="#1479F4"/>
+      <stop offset="1" stop-color="#075BD0"/>
+    </radialGradient>
+    <linearGradient id="gloss" x1="258" y1="150" x2="732" y2="690" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.42"/>
+      <stop offset="0.72" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="badge-shadow" x="-12%" y="-10%" width="124%" height="128%">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#06489B" flood-opacity="0.24"/>
+    </filter>
+  </defs>
+
+  <rect width="1024" height="1024" rx="224" fill="#F5FBFF"/>
+  <circle cx="512" cy="512" r="394" fill="url(#badge)" filter="url(#badge-shadow)"/>
+  <path d="M247 370c62-122 194-198 335-179 112 15 205 78 258 166-65-72-158-117-262-117-151 0-279 95-329 228-13-32-14-67-2-98Z" fill="url(#gloss)"/>
+
+  <path d="M346 522l122 120 214-252"
+        fill="none"
+        stroke="#FFFFFF"
+        stroke-width="78"
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+</svg>
