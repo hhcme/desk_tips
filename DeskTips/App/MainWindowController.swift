@@ -16,15 +16,16 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         self.overlayController = overlayController
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 560),
+            contentRect: NSRect(x: 0, y: 0, width: 1180, height: 680),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "DeskTips"
+        window.minSize = NSSize(width: 1040, height: 560)
         window.center()
         window.setFrameAutosaveName("DeskTipsMainWindow")
-        window.minSize = NSSize(width: 420, height: 400)
+        Self.enforceMinimumWindowSize(window)
         window.isReleasedWhenClosed = false
 
         super.init(window: window)
@@ -40,6 +41,18 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+
+    private static func enforceMinimumWindowSize(_ window: NSWindow) {
+        let frame = window.frame
+        let minSize = window.minSize
+        guard frame.width < minSize.width || frame.height < minSize.height else { return }
+
+        var adjustedFrame = frame
+        adjustedFrame.size.width = max(frame.width, minSize.width)
+        adjustedFrame.size.height = max(frame.height, minSize.height)
+        adjustedFrame.origin.y -= adjustedFrame.height - frame.height
+        window.setFrame(adjustedFrame, display: false)
+    }
 
     func showMainWindow() {
         window?.makeKeyAndOrderFront(nil)

@@ -46,6 +46,33 @@ struct TodoStoreTests {
         #expect(item.priority == .high)
     }
 
+    @Test("Update todo edits fields")
+    func updateTodo() {
+        let mock = MockPersistence()
+        let store = TodoStore(persistence: mock)
+        let cat = store.categories[0]
+        let due = Date().addingTimeInterval(7200)
+        store.add(title: "Original")
+
+        let id = store.items[0].id
+        store.update(id: id, title: "  Updated  ", categoryID: cat.id, dueDate: due, priority: .low)
+
+        let item = store.items[0]
+        #expect(item.title == "Updated")
+        #expect(item.categoryID == cat.id)
+        #expect(item.dueDate == due)
+        #expect(item.priority == .low)
+
+        let saveCount = mock.saveCount
+        store.update(id: id, title: "   ", categoryID: nil, dueDate: nil, priority: .high)
+
+        #expect(store.items[0].title == "Updated")
+        #expect(store.items[0].categoryID == cat.id)
+        #expect(store.items[0].dueDate == due)
+        #expect(store.items[0].priority == .low)
+        #expect(mock.saveCount == saveCount)
+    }
+
     @Test("Toggle marks item complete in place")
     func toggleComplete() {
         let mock = MockPersistence()
@@ -99,6 +126,32 @@ struct TodoStoreTests {
         #expect(store.items[0].categoryID == cat.id)
         store.removeCategory(id: cat.id)
         #expect(store.items[0].categoryID == nil)
+    }
+
+    @Test("Batch remove categories unsets active and completed items")
+    func batchRemoveCategories() {
+        let mock = MockPersistence()
+        let store = TodoStore(persistence: mock)
+        let work = store.categories[0]
+        let life = store.categories[1]
+        let study = store.categories[2]
+
+        store.add(title: "Work task", categoryID: work.id)
+        store.add(title: "Life task", categoryID: life.id)
+        store.add(title: "Study task", categoryID: study.id)
+        store.add(title: "Completed work", categoryID: work.id)
+        store.toggle(store.items[3])
+        store.clearCompleted()
+
+        store.removeCategories(ids: [work.id, life.id])
+
+        #expect(store.categories.contains { $0.id == work.id } == false)
+        #expect(store.categories.contains { $0.id == life.id } == false)
+        #expect(store.categories.contains { $0.id == study.id } == true)
+        #expect(store.items.first { $0.title == "Work task" }?.categoryID == nil)
+        #expect(store.items.first { $0.title == "Life task" }?.categoryID == nil)
+        #expect(store.items.first { $0.title == "Study task" }?.categoryID == study.id)
+        #expect(store.completedItems.first { $0.title == "Completed work" }?.categoryID == nil)
     }
 
     @Test("Filter by category")

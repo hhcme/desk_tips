@@ -42,7 +42,7 @@ struct HistoryView: View {
             Text("暂无历史记录")
                 .font(.callout)
                 .foregroundStyle(.secondary)
-            Text("完成的待办事项会出现在这里")
+            Text("归档后的已完成待办会出现在这里")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }

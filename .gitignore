@@ -24,6 +24,9 @@ xcuserdata/
 *.dSYM.zip
 *.dSYM
 
+# Release artifacts
+dist/
+
 # Swift Package Manager
 .build/
 .swiftpm/

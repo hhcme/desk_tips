@@ -8,99 +8,164 @@ struct MainSettingsView: View {
     let overlayController: OverlayWindowController
 
     @State private var launchAtLogin = false
+    @State private var selectedSection: SettingsSection = .overlay
 
     var body: some View {
+        HStack(spacing: 0) {
+            sidebar
+
+            Divider()
+
+            detailPane
+        }
+    }
+
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("设置")
+                .font(.title2.weight(.semibold))
+                .padding(.horizontal, 18)
+                .padding(.top, 18)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(SettingsSection.allCases) { section in
+                        sidebarRow(section)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 18)
+            }
+        }
+        .frame(width: 248)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(.quaternary.opacity(0.18))
+    }
+
+    private var detailPane: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                // Overlay Settings
-                overlaySection
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(spacing: 10) {
+                    Image(systemName: selectedSection.systemImage)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24)
 
-                Divider()
+                    Text(selectedSection.title)
+                        .font(.title2.weight(.semibold))
+                }
 
-                // System
-                systemSection
-
-                Divider()
-
-                // Notifications
-                notificationSection
-
-                Divider()
-
-                // About
-                aboutSection
+                selectedDetail
             }
             .padding(24)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func sidebarRow(_ section: SettingsSection) -> some View {
+        let isSelected = selectedSection == section
+
+        return Button {
+            selectedSection = section
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: section.systemImage)
+                    .font(.system(size: 17, weight: .semibold))
+                    .frame(width: 24, height: 24)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(section.title)
+                        .font(.callout.weight(.semibold))
+
+                    Text(section.subtitle)
+                        .font(.caption)
+                        .foregroundStyle(isSelected ? .white.opacity(0.82) : .secondary)
+                }
+
+                Spacer()
+            }
+            .foregroundStyle(isSelected ? .white : .primary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isSelected ? Color.accentColor : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var selectedDetail: some View {
+        switch selectedSection {
+        case .overlay:
+            overlaySection
+        case .system:
+            systemSection
+        case .notifications:
+            notificationSection
         }
     }
 
     // MARK: - Overlay Section
 
     private var overlaySection: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        settingsPanel {
             Label("悬浮窗", systemImage: "rectangle.on.rectangle")
                 .font(.headline)
+
+            Divider()
 
             Toggle("显示悬浮窗", isOn: Binding(
                 get: { settingsStore.settings.isVisible },
                 set: { _ in settingsStore.toggleVisibility() }
             ))
 
-            // Mode picker
-            HStack {
-                Text("显示模式")
-                    .frame(width: 80, alignment: .trailing)
+            formRow("标题") {
+                TextField("DeskTips", text: Binding(
+                    get: { settingsStore.settings.overlayTitle },
+                    set: { settingsStore.updateOverlayTitle($0) }
+                ))
+                .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: 280)
+            }
+
+            formRow("") {
+                Toggle("显示标题", isOn: Binding(
+                    get: { settingsStore.settings.showsOverlayTitle },
+                    set: { settingsStore.setOverlayTitleVisible($0) }
+                ))
+                .toggleStyle(.checkbox)
+            }
+
+            formRow("显示模式") {
                 Picker("", selection: Binding(
                     get: { settingsStore.settings.displayMode },
                     set: { settingsStore.updateDisplayMode($0) }
                 )) {
                     Label("玻璃", systemImage: "sparkles").tag(OverlayDisplayMode.glass)
+                    Label("毛玻璃", systemImage: "rectangle.on.rectangle").tag(OverlayDisplayMode.frosted)
                     Label("透明", systemImage: "eye").tag(OverlayDisplayMode.transparent)
                 }
                 .pickerStyle(.segmented)
+                .frame(maxWidth: 320)
             }
 
-            // Mode-specific slider
-            if settingsStore.settings.displayMode == .glass {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("玻璃强度")
-                            .frame(width: 80, alignment: .trailing)
-                        Slider(value: Binding(
-                            get: { settingsStore.settings.glassIntensity },
-                            set: { settingsStore.updateGlassIntensity($0) }
-                        ), in: 0...1, step: 0.05)
-                        Text("\(Int(settingsStore.settings.glassIntensity * 100))%")
-                            .monospacedDigit()
-                            .frame(width: 40)
-                    }
-                }
-            } else {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("不透明度")
-                            .frame(width: 80, alignment: .trailing)
-                        Slider(value: Binding(
-                            get: { settingsStore.settings.transparentOpacity },
-                            set: { settingsStore.updateTransparentOpacity($0) }
-                        ), in: 0.3...1.0, step: 0.05)
-                        Text("\(Int(settingsStore.settings.transparentOpacity * 100))%")
-                            .monospacedDigit()
-                            .frame(width: 40)
-                    }
-                }
-            }
+            intensityControl
         }
     }
 
     // MARK: - System Section
 
     private var systemSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        settingsPanel {
             Label("系统", systemImage: "gear")
                 .font(.headline)
 
+            Divider()
+
             Toggle("开机自启动", isOn: $launchAtLogin)
+                .toggleStyle(.checkbox)
                 .onChange(of: launchAtLogin) { _, newValue in
                     setLaunchAtLogin(newValue)
                 }
@@ -122,13 +187,13 @@ struct MainSettingsView: View {
     ]
 
     private var notificationSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        settingsPanel {
             Label("通知提醒", systemImage: "bell")
                 .font(.headline)
 
-            HStack {
-                Text("默认提醒时间")
-                    .frame(width: 100, alignment: .trailing)
+            Divider()
+
+            formRow("默认提醒") {
                 Picker("", selection: Binding(
                     get: { settingsStore.settings.defaultReminderOffset },
                     set: { settingsStore.updateDefaultReminderOffset($0) }
@@ -142,55 +207,7 @@ struct MainSettingsView: View {
         }
     }
 
-    // MARK: - About Section
-
-    private var aboutSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Label("关于", systemImage: "info.circle")
-                .font(.headline)
-
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text("DeskTips")
-                        .font(.title3.weight(.semibold))
-                    Spacer()
-                }
-
-                Text("桌面悬浮待办工具")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-
-                HStack {
-                    Text("版本")
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text(appVersion)
-                        .foregroundStyle(.secondary)
-                }
-                .font(.callout)
-
-                HStack {
-                    Text("系统")
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text("macOS \(ProcessInfo.processInfo.operatingSystemVersionString)")
-                        .foregroundStyle(.secondary)
-                }
-                .font(.callout)
-            }
-            .padding(12)
-            .background(.quaternary.opacity(0.5))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-        }
-    }
-
     // MARK: - Helpers
-
-    private var appVersion: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
-        return "\(version) (\(build))"
-    }
 
     private func setLaunchAtLogin(_ enabled: Bool) {
         do {
@@ -203,6 +220,123 @@ struct MainSettingsView: View {
             // Revert on failure
             launchAtLogin = !enabled
             NSLog("[DeskTips] Launch at login error: %@", error.localizedDescription)
+        }
+    }
+
+    @ViewBuilder
+    private var intensityControl: some View {
+        switch settingsStore.settings.displayMode {
+        case .glass:
+            formRow("玻璃强度") {
+                sliderRow(
+                    value: settingsStore.settings.glassIntensity,
+                    range: 0...1,
+                    binding: Binding(
+                        get: { settingsStore.settings.glassIntensity },
+                        set: { settingsStore.updateGlassIntensity($0) }
+                    )
+                )
+            }
+        case .frosted:
+            formRow("模糊强度") {
+                sliderRow(
+                    value: settingsStore.settings.glassIntensity,
+                    range: 0...1,
+                    binding: Binding(
+                        get: { settingsStore.settings.glassIntensity },
+                        set: { settingsStore.updateGlassIntensity($0) }
+                    )
+                )
+            }
+        case .transparent:
+            formRow("透明度") {
+                sliderRow(
+                    value: settingsStore.settings.transparentOpacity,
+                    range: 0.3...1,
+                    binding: Binding(
+                        get: { settingsStore.settings.transparentOpacity },
+                        set: { settingsStore.updateTransparentOpacity($0) }
+                    )
+                )
+            }
+        }
+    }
+
+    private func settingsPanel<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 14, content: content)
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .background(.quaternary.opacity(0.45))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func formRow<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            Text(title)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .frame(width: 82, alignment: .trailing)
+
+            content()
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func sliderRow(
+        value: Double,
+        range: ClosedRange<Double>,
+        binding: Binding<Double>
+    ) -> some View {
+        HStack(spacing: 10) {
+            Slider(value: binding, in: range, step: 0.05)
+                .frame(maxWidth: 360)
+
+            Text("\(Int(value * 100))%")
+                .font(.callout.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 44, alignment: .trailing)
+        }
+    }
+}
+
+private enum SettingsSection: String, CaseIterable, Identifiable {
+    case overlay
+    case system
+    case notifications
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .overlay:
+            return "桌面悬浮"
+        case .system:
+            return "系统"
+        case .notifications:
+            return "通知提醒"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .overlay:
+            return "显示、标题与外观"
+        case .system:
+            return "开机自启动"
+        case .notifications:
+            return "默认提醒时间"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .overlay:
+            return "rectangle.on.rectangle"
+        case .system:
+            return "gearshape"
+        case .notifications:
+            return "bell"
         }
     }
 }

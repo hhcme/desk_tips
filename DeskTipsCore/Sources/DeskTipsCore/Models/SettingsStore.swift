@@ -40,13 +40,22 @@ public final class SettingsStore: ObservableObject {
 
     public func updateOverlayTitle(_ title: String) {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
         settings.overlayTitle = trimmed
+        save()
+    }
+
+    public func setOverlayTitleVisible(_ visible: Bool) {
+        settings.showsOverlayTitle = visible
         save()
     }
 
     public func updateDefaultReminderOffset(_ offset: TimeInterval) {
         settings.defaultReminderOffset = max(offset, 0)
+        save()
+    }
+
+    public func updateOverlayWindowPlacement(_ placement: OverlayWindowPlacement) {
+        settings.overlayWindowPlacement = placement
         save()
     }
 

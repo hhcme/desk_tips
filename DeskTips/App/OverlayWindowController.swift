@@ -11,7 +11,7 @@ final class OverlayWindowController: NSWindowController {
     private let settingsStore: SettingsStore
     private var hostingController: NSHostingController<OverlayContentView>!
     private var cancellables = Set<AnyCancellable>()
-    nonisolated(unsafe) private var keyEventMonitor: Any?
+    private let restoreMargin: CGFloat = 12
 
     init(store: TodoStore, settingsStore: SettingsStore) {
         self.store = store
@@ -19,7 +19,7 @@ final class OverlayWindowController: NSWindowController {
 
         let window = OverlayPanel(
             contentRect: NSRect(x: 200, y: 200, width: 280, height: 400),
-            styleMask: [.borderless],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
@@ -33,40 +33,31 @@ final class OverlayWindowController: NSWindowController {
         window.hidesOnDeactivate = false
         window.isRestorable = false
         window.acceptsMouseMovedEvents = true
-        window.setFrameAutosaveName("DeskTipsOverlay")
+        window.becomesKeyOnlyIfNeeded = true
         window.identifier = NSUserInterfaceItemIdentifier("DeskTipsOverlay")
 
         super.init(window: window)
 
-        let contentView = OverlayContentView(
-            store: store,
-            settingsStore: settingsStore,
-            onEditModeChanged: { [weak self] editMode in
-                self?.applyEditMode(editMode)
-            }
-        )
+        let contentView = OverlayContentView(store: store, settingsStore: settingsStore)
         hostingController = NSHostingController(rootView: contentView)
         hostingController.view.wantsLayer = true
+        hostingController.view.layer?.backgroundColor = NSColor.clear.cgColor
 
         window.contentViewController = hostingController
         hostingController.view.layoutSubtreeIfNeeded()
         let fittingSize = hostingController.view.fittingSize
         window.setContentSize(NSSize(width: max(fittingSize.width, 280), height: max(fittingSize.height, 200)))
 
-        if !window.frameAutosaveName.isEmpty,
-           UserDefaults.standard.string(forKey: "NSWindow Frame DeskTipsOverlay") == nil {
-            if let screen = NSScreen.main {
-                let sf = screen.visibleFrame
-                window.setFrameOrigin(NSPoint(x: sf.maxX - 300, y: sf.maxY - 460))
-            }
-        }
+        applyInitialFrame(to: window)
+        window.delegate = self
+        persistWindowPlacement(for: window)
 
         settingsStore.$settings
             .map(\.isVisible)
             .removeDuplicates()
             .sink { [weak self] isVisible in
                 guard let self, let win = self.window else { return }
-                if isVisible { win.orderFront(nil) } else { win.orderOut(nil) }
+                if isVisible { win.orderFrontRegardless() } else { win.orderOut(nil) }
             }
             .store(in: &cancellables)
     }
@@ -74,97 +65,172 @@ final class OverlayWindowController: NSWindowController {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    deinit {
-        if let monitor = keyEventMonitor { NSEvent.removeMonitor(monitor) }
-    }
-
-    // MARK: - Edit Mode
-
-    private func applyEditMode(_ editMode: Bool) {
-        guard let win = window else { return }
-        let topY = win.frame.maxY
-
-        if editMode {
-            win.isMovableByWindowBackground = false
-            NSApp.setActivationPolicy(.regular)
-            NSApp.activate(ignoringOtherApps: true)
-            win.makeKeyAndOrderFront(nil)
-
-            // Start intercepting keyboard events for paste/copy/etc.
-            startKeyEventMonitor()
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                win.makeFirstResponder(win.contentView)
-            }
-        } else {
-            win.isMovableByWindowBackground = true
-            win.resignKey()
-            NSApp.setActivationPolicy(.accessory)
-            stopKeyEventMonitor()
-        }
-
-        // Resize keeping top edge fixed
-        DispatchQueue.main.async { [weak self] in
-            guard let self, let hosting = self.hostingController else { return }
-            hosting.view.layoutSubtreeIfNeeded()
-            let s = hosting.view.fittingSize
-            win.setContentSize(NSSize(width: max(s.width, 280), height: max(s.height, 200)))
-            win.setFrameOrigin(CGPoint(x: win.frame.origin.x, y: topY - max(s.height, 200)))
-        }
-    }
-
-    // MARK: - Keyboard Event Monitor
-
-    /// Intercepts keyboard events (Cmd+V, Cmd+C, etc.) and forwards them
-    /// to the window's first responder, bypassing system-level interception.
-    private func startKeyEventMonitor() {
-        guard keyEventMonitor == nil else { return }
-        keyEventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { [weak self] event in
-            guard let self, let win = self.window, win.isKeyWindow else { return event }
-
-            // Let Cmd+key shortcuts (paste, copy, etc.) go through the normal
-            // menu routing system — do NOT intercept them here.
-            if event.modifierFlags.contains(.command) {
-                return event  // pass to AppKit's sendEvent → performKeyEquivalent → menu
-            }
-
-            // Forward plain key events to the first responder
-            if let responder = win.firstResponder {
-                switch event.type {
-                case .keyDown: responder.keyDown(with: event)
-                case .keyUp: responder.keyUp(with: event)
-                case .flagsChanged: responder.flagsChanged(with: event)
-                default: break
-                }
-                return nil
-            }
-            return event
-        }
-    }
-
-    private func stopKeyEventMonitor() {
-        if let monitor = keyEventMonitor {
-            NSEvent.removeMonitor(monitor)
-            keyEventMonitor = nil
-        }
-    }
-
     // MARK: - Public API
 
     func toggleOverlay() { settingsStore.toggleVisibility() }
     var isOverlayVisible: Bool { settingsStore.settings.isVisible }
+
+    // MARK: - Placement
+
+    private func applyInitialFrame(to window: NSWindow) {
+        let windowSize = window.frame.size
+        let origin: NSPoint
+
+        if let placement = settingsStore.settings.overlayWindowPlacement {
+            origin = restoredOrigin(for: placement, windowSize: windowSize)
+        } else {
+            origin = defaultOrigin(for: windowSize)
+        }
+
+        window.setFrameOrigin(origin)
+    }
+
+    private func restoredOrigin(for placement: OverlayWindowPlacement, windowSize: NSSize) -> NSPoint {
+        let savedOrigin = NSPoint(x: CGFloat(placement.originX), y: CGFloat(placement.originY))
+        let savedSize = NSSize(width: CGFloat(max(placement.width, 1)), height: CGFloat(max(placement.height, 1)))
+        let savedCenter = NSPoint(x: savedOrigin.x + savedSize.width / 2, y: savedOrigin.y + savedSize.height / 2)
+
+        guard let targetScreen = screen(matching: placement.screenID)
+            ?? screen(containing: savedCenter)
+            ?? NSScreen.main
+            ?? NSScreen.screens.first
+        else {
+            return savedOrigin
+        }
+
+        let visibleFrame = targetScreen.visibleFrame
+        if let screenID = placement.screenID, screenID == screenIdentifier(for: targetScreen) {
+            return clampedOrigin(savedOrigin, windowSize: windowSize, visibleFrame: visibleFrame)
+        }
+
+        guard let previousVisibleFrame = placement.screenVisibleFrame?.nsRect,
+              previousVisibleFrame.width > 0,
+              previousVisibleFrame.height > 0
+        else {
+            return clampedOrigin(savedOrigin, windowSize: windowSize, visibleFrame: visibleFrame)
+        }
+
+        let relativeX = normalizedPosition(
+            savedOrigin.x - previousVisibleFrame.minX,
+            availableLength: previousVisibleFrame.width - savedSize.width,
+            fallback: 1
+        )
+        let relativeY = normalizedPosition(
+            savedOrigin.y - previousVisibleFrame.minY,
+            availableLength: previousVisibleFrame.height - savedSize.height,
+            fallback: 1
+        )
+
+        let availableWidth = max(visibleFrame.width - windowSize.width, 0)
+        let availableHeight = max(visibleFrame.height - windowSize.height, 0)
+        let migratedOrigin = NSPoint(
+            x: visibleFrame.minX + availableWidth * relativeX,
+            y: visibleFrame.minY + availableHeight * relativeY
+        )
+
+        return clampedOrigin(migratedOrigin, windowSize: windowSize, visibleFrame: visibleFrame)
+    }
+
+    private func defaultOrigin(for windowSize: NSSize) -> NSPoint {
+        guard let screen = NSScreen.main ?? NSScreen.screens.first else {
+            return NSPoint(x: 200, y: 200)
+        }
+
+        let visibleFrame = screen.visibleFrame
+        return clampedOrigin(
+            NSPoint(x: visibleFrame.maxX - windowSize.width - restoreMargin, y: visibleFrame.maxY - windowSize.height - restoreMargin),
+            windowSize: windowSize,
+            visibleFrame: visibleFrame
+        )
+    }
+
+    private func normalizedPosition(_ position: CGFloat, availableLength: CGFloat, fallback: CGFloat) -> CGFloat {
+        guard availableLength > 1 else { return fallback }
+        return min(max(position / availableLength, 0), 1)
+    }
+
+    private func clampedOrigin(_ origin: NSPoint, windowSize: NSSize, visibleFrame: NSRect) -> NSPoint {
+        let minX = visibleFrame.minX + restoreMargin
+        let maxX = visibleFrame.maxX - windowSize.width - restoreMargin
+        let minY = visibleFrame.minY + restoreMargin
+        let maxY = visibleFrame.maxY - windowSize.height - restoreMargin
+
+        let x = maxX >= minX ? min(max(origin.x, minX), maxX) : visibleFrame.midX - windowSize.width / 2
+        let y = maxY >= minY ? min(max(origin.y, minY), maxY) : visibleFrame.midY - windowSize.height / 2
+
+        return NSPoint(x: x, y: y)
+    }
+
+    private func persistWindowPlacement(for window: NSWindow) {
+        let frame = window.frame
+        let screen = window.screen ?? screen(containing: frame.center) ?? NSScreen.main ?? NSScreen.screens.first
+        let placement = OverlayWindowPlacement(
+            originX: Double(frame.origin.x),
+            originY: Double(frame.origin.y),
+            width: Double(frame.width),
+            height: Double(frame.height),
+            screenID: screen.flatMap(screenIdentifier(for:)),
+            screenVisibleFrame: screen.map { OverlayWindowFrame($0.visibleFrame) }
+        )
+
+        guard placement != settingsStore.settings.overlayWindowPlacement else { return }
+        settingsStore.updateOverlayWindowPlacement(placement)
+    }
+
+    private func screen(matching screenID: String?) -> NSScreen? {
+        guard let screenID else { return nil }
+        return NSScreen.screens.first { screenIdentifier(for: $0) == screenID }
+    }
+
+    private func screen(containing point: NSPoint) -> NSScreen? {
+        NSScreen.screens.first { $0.frame.contains(point) }
+    }
+
+    private func screenIdentifier(for screen: NSScreen) -> String? {
+        guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
+            return nil
+        }
+        return number.stringValue
+    }
 }
 
-/// Custom NSPanel that can become key and forwards keyboard shortcuts to first responder.
+extension OverlayWindowController: NSWindowDelegate {
+    func windowDidMove(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow else { return }
+        persistWindowPlacement(for: window)
+    }
+
+    func windowDidEndLiveResize(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow else { return }
+        persistWindowPlacement(for: window)
+    }
+}
+
+/// Non-activating panel for the floating overlay.
 private class OverlayPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
-    // Let the Edit menu's Cmd+C/V/X/A/Z reach the first responder (TextField)
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if isKeyWindow, let responder = firstResponder {
             return responder.performKeyEquivalent(with: event)
         }
         return super.performKeyEquivalent(with: event)
+    }
+}
+
+private extension OverlayWindowFrame {
+    init(_ rect: NSRect) {
+        self.init(x: Double(rect.origin.x), y: Double(rect.origin.y), width: Double(rect.width), height: Double(rect.height))
+    }
+
+    var nsRect: NSRect {
+        NSRect(x: CGFloat(x), y: CGFloat(y), width: CGFloat(width), height: CGFloat(height))
+    }
+}
+
+private extension NSRect {
+    var center: NSPoint {
+        NSPoint(x: midX, y: midY)
     }
 }

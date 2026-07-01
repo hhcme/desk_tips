@@ -8,12 +8,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusBarController: StatusBarController!
     private var overlayController: OverlayWindowController!
     private var mainWindowController: MainWindowController!
+    private var updateManager: UpdateManager!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
         todoStore = TodoStore()
         settingsStore = SettingsStore()
+        updateManager = UpdateManager.shared
 
         // Request notification permission and check overdue
         Task {
@@ -39,6 +41,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             overlayController: overlayController,
             mainWindowController: mainWindowController
         )
+
+        updateManager.performLaunchCheckIfNeeded()
 
         if settingsStore.settings.isVisible {
             overlayController.showWindow(nil)

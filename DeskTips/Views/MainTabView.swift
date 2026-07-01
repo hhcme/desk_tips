@@ -7,6 +7,8 @@ struct MainTabView: View {
     @ObservedObject var settingsStore: SettingsStore
     let overlayController: OverlayWindowController
 
+    @StateObject private var updateManager = UpdateManager.shared
+
     var body: some View {
         TabView {
             TodoListView(store: store)
@@ -23,7 +25,11 @@ struct MainTabView: View {
                 overlayController: overlayController
             )
             .tabItem { Label("设置", systemImage: "gear") }
+
+            MainAboutView()
+                .tabItem { Label("关于", systemImage: "info.circle") }
+                .badge(updateManager.hasAvailableUpdate ? "" : nil)
         }
-        .frame(minWidth: 420, minHeight: 400)
+        .frame(minWidth: 1040, minHeight: 560)
     }
 }

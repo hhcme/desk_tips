@@ -87,6 +87,23 @@ public final class TodoStore: ObservableObject {
         save()
     }
 
+    public func update(
+        id: UUID,
+        title: String,
+        categoryID: UUID?,
+        dueDate: Date?,
+        priority: Priority
+    ) {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        items[index].title = trimmed
+        items[index].categoryID = categoryID
+        items[index].dueDate = dueDate
+        items[index].priority = priority
+        save()
+    }
+
     public func clearCompleted() {
         let completed = items.filter { $0.isCompleted }
         guard !completed.isEmpty else { return }
@@ -114,14 +131,28 @@ public final class TodoStore: ObservableObject {
     }
 
     public func removeCategory(id: UUID) {
-        categories.removeAll { $0.id == id }
-        // Unset categoryID for items in this category
-        for i in items.indices where items[i].categoryID == id {
-            items[i].categoryID = nil
+        removeCategories(ids: [id])
+    }
+
+    public func removeCategories(ids: Set<UUID>) {
+        guard !ids.isEmpty else { return }
+        let existingIDs = Set(categories.map(\.id)).intersection(ids)
+        guard !existingIDs.isEmpty else { return }
+
+        categories.removeAll { existingIDs.contains($0.id) }
+
+        for index in items.indices {
+            if let categoryID = items[index].categoryID, existingIDs.contains(categoryID) {
+                items[index].categoryID = nil
+            }
         }
-        for i in completedItems.indices where completedItems[i].categoryID == id {
-            completedItems[i].categoryID = nil
+
+        for index in completedItems.indices {
+            if let categoryID = completedItems[index].categoryID, existingIDs.contains(categoryID) {
+                completedItems[index].categoryID = nil
+            }
         }
+
         save()
     }
 

@@ -33,8 +33,8 @@ struct SettingsStoreTests {
     func updateDisplayMode() {
         let mock = MockSettingsPersistence()
         let store = SettingsStore(persistence: mock)
-        store.updateDisplayMode(.transparent)
-        #expect(store.settings.displayMode == .transparent)
+        store.updateDisplayMode(.frosted)
+        #expect(store.settings.displayMode == .frosted)
         #expect(mock.saveCount == 1)
     }
 
@@ -84,15 +84,80 @@ struct SettingsStoreTests {
         #expect(mock.saveCount == 1)
     }
 
+    @Test("Update overlay title and visibility")
+    func updateOverlayTitleAndVisibility() {
+        let mock = MockSettingsPersistence()
+        let store = SettingsStore(persistence: mock)
+
+        store.updateOverlayTitle("  Focus  ")
+        store.setOverlayTitleVisible(false)
+
+        #expect(store.settings.overlayTitle == "Focus")
+        #expect(store.settings.showsOverlayTitle == false)
+        #expect(mock.saveCount == 2)
+    }
+
+    @Test("Decode old settings defaults overlay title visibility")
+    func decodeOldSettingsDefaultsOverlayTitleVisibility() throws {
+        let json = """
+        {
+          "displayMode": "transparent",
+          "glassIntensity": 0.5,
+          "transparentOpacity": 0.8,
+          "isVisible": true,
+          "overlayTitle": "Old",
+          "defaultReminderOffset": 300
+        }
+        """
+
+        let settings = try JSONDecoder().decode(OverlaySettings.self, from: Data(json.utf8))
+
+        #expect(settings.overlayTitle == "Old")
+        #expect(settings.showsOverlayTitle == true)
+        #expect(settings.overlayWindowPlacement == nil)
+    }
+
+    @Test("Update overlay window placement")
+    func updateOverlayWindowPlacement() {
+        let mock = MockSettingsPersistence()
+        let store = SettingsStore(persistence: mock)
+        let placement = OverlayWindowPlacement(
+            originX: 120,
+            originY: 340,
+            width: 260,
+            height: 420,
+            screenID: "1",
+            screenVisibleFrame: OverlayWindowFrame(x: 0, y: 0, width: 1440, height: 900)
+        )
+
+        store.updateOverlayWindowPlacement(placement)
+
+        #expect(store.settings.overlayWindowPlacement == placement)
+        #expect(mock.stored.overlayWindowPlacement == placement)
+        #expect(mock.saveCount == 1)
+    }
+
     @Test("Persistence round-trip")
     func persistenceRoundTrip() {
         let mock = MockSettingsPersistence()
         let store = SettingsStore(persistence: mock)
         store.updateDisplayMode(.transparent)
         store.updateTransparentOpacity(0.55)
+        store.updateOverlayWindowPlacement(
+            OverlayWindowPlacement(
+                originX: 100,
+                originY: 200,
+                width: 260,
+                height: 360,
+                screenID: "main",
+                screenVisibleFrame: OverlayWindowFrame(x: 0, y: 0, width: 1200, height: 800)
+            )
+        )
         // Create new store from same persistence
         let store2 = SettingsStore(persistence: mock)
         #expect(store2.settings.displayMode == .transparent)
         #expect(store2.settings.transparentOpacity == 0.55)
+        #expect(store2.settings.overlayWindowPlacement?.originX == 100)
+        #expect(store2.settings.overlayWindowPlacement?.screenID == "main")
     }
 }

@@ -1,202 +1,165 @@
 import SwiftUI
 import DeskTipsCore
 
-/// Settings popover content — shown from the menu bar icon.
-/// Will be replaced by QuickPopoverView in Step 4.
+/// Settings popover content shown from the menu bar icon.
 struct SettingsView: View {
     @ObservedObject var store: TodoStore
     @ObservedObject var settingsStore: SettingsStore
     let overlayController: OverlayWindowController
     var onOpenMainWindow: () -> Void = {}
 
-    @State private var newTodoText = ""
-
     var body: some View {
         VStack(spacing: 0) {
-            // Header
             header
 
             Divider()
 
-            // Controls
             controls
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
 
             Divider()
 
-            // Todo list
-            todoList
-
-            Divider()
-
-            // Add todo
-            addTodoBar
-                .padding(12)
-
-            // Footer
             footer
         }
-        .frame(width: 300, height: 440)
+        .frame(width: 320, height: 250)
     }
 
     // MARK: - Header
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 10) {
             Image(systemName: "checklist.checked")
-                .font(.title2)
+                .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(.tint)
+
             Text("DeskTips")
-                .font(.headline)
+                .font(.system(size: 17, weight: .semibold))
+
             Spacer()
+
             Text("\(store.items.count) 待办")
-                .font(.caption)
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(.quaternary.opacity(0.6))
+                .clipShape(Capsule())
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.vertical, 12)
     }
 
     // MARK: - Controls
 
     private var controls: some View {
-        VStack(spacing: 10) {
-            HStack {
-                Toggle("显示悬浮窗", isOn: Binding(
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Label("显示悬浮窗", systemImage: "rectangle.on.rectangle")
+                    .font(.callout.weight(.semibold))
+
+                Spacer()
+
+                Toggle("", isOn: Binding(
                     get: { settingsStore.settings.isVisible },
                     set: { _ in settingsStore.toggleVisibility() }
                 ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
             }
 
-            HStack {
+            VStack(alignment: .leading, spacing: 8) {
                 Text("模式")
-                    .font(.callout)
-                Spacer()
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
                 Picker("", selection: Binding(
                     get: { settingsStore.settings.displayMode },
                     set: { settingsStore.updateDisplayMode($0) }
                 )) {
                     Text("玻璃").tag(OverlayDisplayMode.glass)
+                    Text("毛玻璃").tag(OverlayDisplayMode.frosted)
                     Text("透明").tag(OverlayDisplayMode.transparent)
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 140)
+                .labelsHidden()
+                .controlSize(.small)
             }
 
-            if settingsStore.settings.displayMode == .glass {
-                HStack {
-                    Text("玻璃强度")
-                        .font(.callout)
-                    Slider(value: Binding(
-                        get: { settingsStore.settings.glassIntensity },
-                        set: { settingsStore.updateGlassIntensity($0) }
-                    ), in: 0...1, step: 0.05)
-                    Text("\(Int(settingsStore.settings.glassIntensity * 100))%")
-                        .font(.caption)
-                        .monospacedDigit()
-                        .frame(width: 36)
-                }
-            } else {
-                HStack {
-                    Text("不透明度")
-                        .font(.callout)
-                    Slider(value: Binding(
-                        get: { settingsStore.settings.transparentOpacity },
-                        set: { settingsStore.updateTransparentOpacity($0) }
-                    ), in: 0.3...1.0, step: 0.05)
-                    Text("\(Int(settingsStore.settings.transparentOpacity * 100))%")
-                        .font(.caption)
-                        .monospacedDigit()
-                        .frame(width: 36)
+            switch settingsStore.settings.displayMode {
+            case .glass:
+                intensitySlider(title: "玻璃强度")
+            case .frosted:
+                intensitySlider(title: "模糊强度")
+            case .transparent:
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("透明度")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    HStack(spacing: 10) {
+                        Slider(value: Binding(
+                            get: { settingsStore.settings.transparentOpacity },
+                            set: { settingsStore.updateTransparentOpacity($0) }
+                        ), in: 0.3...1.0, step: 0.05)
+
+                        valueBadge(Int(settingsStore.settings.transparentOpacity * 100))
+                    }
                 }
             }
         }
     }
 
-    // MARK: - Todo List
+    private func intensitySlider(title: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
 
-    private var todoList: some View {
-        List {
-            ForEach(store.items) { item in
-                HStack(spacing: 8) {
-                    Button {
-                        store.toggle(item)
-                    } label: {
-                        Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(item.isCompleted ? .green : .secondary)
-                    }
-                    .buttonStyle(.plain)
+            HStack(spacing: 10) {
+                Slider(value: Binding(
+                    get: { settingsStore.settings.glassIntensity },
+                    set: { settingsStore.updateGlassIntensity($0) }
+                ), in: 0...1, step: 0.05)
 
-                    Text(item.title)
-                        .strikethrough(item.isCompleted)
-                        .foregroundStyle(item.isCompleted ? .secondary : .primary)
-                        .font(.callout)
-
-                    Spacer()
-
-                    Button {
-                        store.remove(id: item.id)
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.secondary.opacity(0.5))
-                            .font(.caption)
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(.vertical, 2)
+                valueBadge(Int(settingsStore.settings.glassIntensity * 100))
             }
         }
-        .listStyle(.plain)
     }
 
-    // MARK: - Add Todo Bar
-
-    private var addTodoBar: some View {
-        HStack(spacing: 8) {
-            TextField("添加待办…", text: $newTodoText)
-                .textFieldStyle(.plain)
-                .font(.callout)
-                .onSubmit {
-                    addTodo()
-                }
-
-            Button {
-                addTodo()
-            } label: {
-                Image(systemName: "plus.circle.fill")
-                    .foregroundStyle(.tint)
-                    .font(.title3)
-            }
-            .buttonStyle(.plain)
-            .disabled(newTodoText.trimmingCharacters(in: .whitespaces).isEmpty)
-        }
+    private func valueBadge(_ value: Int) -> some View {
+        Text("\(value)%")
+            .font(.caption.weight(.semibold))
+            .monospacedDigit()
+            .foregroundStyle(.secondary)
+            .frame(width: 44)
+            .padding(.vertical, 3)
+            .background(.quaternary.opacity(0.55))
+            .clipShape(Capsule())
     }
 
     // MARK: - Footer
 
     private var footer: some View {
-        HStack {
-            Button("打开主窗口") {
+        HStack(spacing: 10) {
+            Button {
                 onOpenMainWindow()
+            } label: {
+                Label("主窗口", systemImage: "macwindow")
+                    .frame(maxWidth: .infinity)
             }
-            .font(.caption)
 
-            Spacer()
-
-            Button("退出") {
+            Button {
                 NSApp.terminate(nil)
+            } label: {
+                Label("退出", systemImage: "power")
+                    .frame(maxWidth: .infinity)
             }
-            .font(.caption)
         }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
         .padding(.horizontal, 16)
-        .padding(.bottom, 10)
-    }
-
-    // MARK: - Actions
-
-    private func addTodo() {
-        store.add(title: newTodoText)
-        newTodoText = ""
+        .padding(.vertical, 12)
     }
 }

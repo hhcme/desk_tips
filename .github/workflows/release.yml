@@ -1,0 +1,102 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          BUILD="${VERSION//./}"
+          echo "VERSION=${VERSION}" >> "${GITHUB_ENV}"
+          echo "BUILD=${BUILD}" >> "${GITHUB_ENV}"
+
+      - name: Import Developer ID certificate
+        env:
+          APPLE_DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_BASE64 }}
+          APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          for required_var in APPLE_DEVELOPER_ID_CERTIFICATE_BASE64 APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD KEYCHAIN_PASSWORD; do
+            if [[ -z "${!required_var}" ]]; then
+              echo "${required_var} secret is required for signed Sparkle updates."
+              exit 1
+            fi
+          done
+
+          CERTIFICATE_PATH="${RUNNER_TEMP}/developer_id_application.p12"
+          KEYCHAIN_PATH="${RUNNER_TEMP}/desktips-signing.keychain-db"
+
+          printf "%s" "${APPLE_DEVELOPER_ID_CERTIFICATE_BASE64}" | base64 --decode > "${CERTIFICATE_PATH}"
+
+          security create-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          security set-keychain-settings -lut 21600 "${KEYCHAIN_PATH}"
+          security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          security import "${CERTIFICATE_PATH}" \
+            -P "${APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD}" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "${KEYCHAIN_PATH}"
+          security list-keychains -d user -s "${KEYCHAIN_PATH}"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+
+          DEVELOPER_ID_APPLICATION="$(security find-identity -v -p codesigning "${KEYCHAIN_PATH}" | sed -n 's/.*"\(Developer ID Application:.*\)".*/\1/p' | head -n 1)"
+
+          if [[ -z "${DEVELOPER_ID_APPLICATION}" ]]; then
+            echo "No Developer ID Application identity found in imported certificate."
+            exit 1
+          fi
+
+          echo "DEVELOPER_ID_APPLICATION=${DEVELOPER_ID_APPLICATION}" >> "${GITHUB_ENV}"
+
+      - name: Build release assets
+        env:
+          VERSION: ${{ env.VERSION }}
+          BUILD: ${{ env.BUILD }}
+          TAG: ${{ github.ref_name }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          DEVELOPER_ID_APPLICATION: ${{ env.DEVELOPER_ID_APPLICATION }}
+          DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          REQUIRE_RELEASE_SIGNING: "true"
+          NOTARIZE: "true"
+        run: |
+          if [[ -z "${SPARKLE_PRIVATE_KEY}" ]]; then
+            echo "SPARKLE_PRIVATE_KEY secret is required for signed Sparkle updates."
+            exit 1
+          fi
+
+          ./scripts/package_release.sh
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          NOTES="release-notes/${VERSION}.md"
+          DMG="dist/DeskTips-${VERSION}-macOS.dmg"
+          APPCAST="dist/appcast.xml"
+
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" "${DMG}" "${APPCAST}" --clobber
+            gh release edit "${TAG}" --title "${TAG}" --notes-file "${NOTES}"
+          else
+            gh release create "${TAG}" "${DMG}" "${APPCAST}" --title "${TAG}" --notes-file "${NOTES}"
+          fi

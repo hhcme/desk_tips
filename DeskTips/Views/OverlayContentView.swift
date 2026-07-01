@@ -2,24 +2,50 @@ import SwiftUI
 import AppKit
 import DeskTipsCore
 
-/// Floating overlay content — simplified view-only list with lock/edit dual mode.
+/// Floating overlay content — compact grouped todo list.
 struct OverlayContentView: View {
     @ObservedObject var store: TodoStore
     @ObservedObject var settingsStore: SettingsStore
-    let onEditModeChanged: (Bool) -> Void
 
-    @State private var isEditMode = false
-
+    @ViewBuilder
     var body: some View {
+        let settings = settingsStore.settings
+        let cornerRadius: CGFloat = 14
+        switch settings.displayMode {
+        case .glass:
+            let intensity = min(max(settings.glassIntensity, 0), 1)
+            GlassEffectContainer(
+                cornerRadius: cornerRadius,
+                tintOpacity: intensity * 0.06
+            ) {
+                framedContent
+            }
+        case .frosted, .transparent:
+            framedContent
+                .background { overlayBackground }
+                .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+        }
+    }
+
+    private var framedContent: some View {
+        overlayContent
+            .frame(width: 260)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var overlayContent: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Drag handle — always visible
             dragHandle
 
-            // Header
-            header
+            if settingsStore.settings.showsOverlayTitle {
+                // Header
+                header
 
-            Divider()
-                .padding(.horizontal, 8)
+                Divider()
+                    .padding(.horizontal, 8)
+                    .overlay(WindowDragRegion())
+            }
 
             // Todo list grouped by category
             if store.items.isEmpty {
@@ -27,24 +53,19 @@ struct OverlayContentView: View {
             } else {
                 categoryGroupedList
             }
-
-            // Footer: completed/total count
-            footer
-        }
-        .frame(width: 260)
-        .fixedSize(horizontal: false, vertical: true)
-        .background { overlayBackground }
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: isEditMode)
-        .onChange(of: isEditMode) { _, newValue in
-            onEditModeChanged(newValue)
         }
     }
 
     // MARK: - Drag Handle
 
     private var dragHandle: some View {
-        DragHandleView()
+        ZStack {
+            Capsule()
+                .fill(.secondary.opacity(0.35))
+                .frame(width: 36, height: 4)
+
+            WindowDragRegion()
+        }
             .frame(height: 20)
             .padding(.horizontal, 8)
     }
@@ -52,33 +73,17 @@ struct OverlayContentView: View {
     // MARK: - Header
 
     private var header: some View {
-        HStack(spacing: 6) {
-            Text(settingsStore.settings.overlayTitle)
+        ZStack {
+            Text(overlayTitle)
                 .font(.caption.weight(.semibold))
-
-            Spacer()
-
-            let completed = store.items.filter { $0.isCompleted }.count
-            let total = store.items.count
-            Text("\(completed)/\(total)")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-
-            // Lock/Unlock toggle
-            Button {
-                withAnimation { isEditMode.toggle() }
-            } label: {
-                Image(systemName: isEditMode ? "lock.open.fill" : "lock.fill")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.white)
-                    .frame(width: 22, height: 22)
-                    .background(Circle().fill(.tint))
-            }
-            .buttonStyle(.plain)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .center)
         }
         .padding(.horizontal, 12)
-        .padding(.top, isEditMode ? 4 : 10)
+        .padding(.top, 10)
         .padding(.bottom, 6)
+        .overlay(WindowDragRegion())
     }
 
     // MARK: - Category Grouped List
@@ -87,20 +92,22 @@ struct OverlayContentView: View {
         VStack(spacing: 0) {
             ForEach(groupedItems, id: \.category?.id) { group in
                 // Category header
-                categoryHeader(group.category, count: group.items.count)
+                categoryHeader(group.category)
 
                 // Items in this category
                 ForEach(group.items) { item in
                     todoRow(item)
                 }
 
-                Divider().padding(.horizontal, 12)
+                Divider()
+                    .padding(.horizontal, 12)
+                    .overlay(WindowDragRegion())
             }
         }
         .padding(.vertical, 4)
     }
 
-    private func categoryHeader(_ category: DeskTipsCore.Category?, count: Int) -> some View {
+    private func categoryHeader(_ category: DeskTipsCore.Category?) -> some View {
         HStack(spacing: 6) {
             Circle()
                 .fill(Color(hex: category?.color ?? "#888888"))
@@ -109,19 +116,17 @@ struct OverlayContentView: View {
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.secondary)
             Spacer()
-            Text("\(count)")
-                .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
         }
         .padding(.horizontal, 12)
         .padding(.top, 6)
         .padding(.bottom, 2)
+        .overlay(WindowDragRegion())
     }
 
     // MARK: - Todo Row
 
     private func todoRow(_ item: TodoItem) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 0) {
             // Checkbox
             Button {
                 store.toggle(item)
@@ -131,77 +136,38 @@ struct OverlayContentView: View {
                     .foregroundStyle(item.isCompleted ? .green : .secondary)
             }
             .buttonStyle(.plain)
-            .disabled(!isEditMode)
+            .padding(.leading, 12)
+            .padding(.trailing, 6)
+            .padding(.vertical, 4)
 
-            // Priority dot
-            Circle()
-                .fill(priorityColor(item.priority))
-                .frame(width: 6, height: 6)
+            HStack(spacing: 6) {
+                // Priority dot
+                Circle()
+                    .fill(priorityColor(item.priority))
+                    .frame(width: 6, height: 6)
 
-            // Title
-            Text(item.title)
-                .font(.system(size: 13))
-                .strikethrough(item.isCompleted)
-                .foregroundStyle(item.isOverdue ? .red : (item.isCompleted ? .secondary : .primary))
-                .lineLimit(2)
+                // Title
+                Text(item.title)
+                    .font(.system(size: 13))
+                    .strikethrough(item.isCompleted)
+                    .foregroundStyle(item.isOverdue ? .red : (item.isCompleted ? .secondary : .primary))
+                    .lineLimit(2)
 
-            Spacer()
+                Spacer()
 
-            // Due date label
-            if let label = item.dueDateLabel {
-                Text(label)
-                    .font(.system(size: 10))
-                    .foregroundStyle(item.isOverdue ? .red : .secondary)
-            }
-
-            // More menu (edit mode)
-            if isEditMode {
-                Menu {
-                    Button {
-                        store.toggle(item)
-                    } label: {
-                        Label(item.isCompleted ? "取消完成" : "标记完成",
-                              systemImage: item.isCompleted ? "arrow.uturn.backward" : "checkmark")
-                    }
-                    Divider()
-                    Button(role: .destructive) {
-                        store.remove(id: item.id)
-                    } label: {
-                        Label("删除", systemImage: "trash")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 20, height: 20)
-                        .contentShape(Rectangle())
+                // Due date label
+                if let label = item.dueDateLabel {
+                    Text(label)
+                        .font(.system(size: 10))
+                        .foregroundStyle(item.isOverdue ? .red : .secondary)
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.trailing, 12)
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+            .overlay(WindowDragRegion())
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 4)
-        .contentShape(Rectangle())
-    }
-
-    // MARK: - Footer
-
-    private var footer: some View {
-        HStack {
-            Spacer()
-            if store.completedCount > 0 && isEditMode {
-                Button("清理已完成") {
-                    store.clearCompleted()
-                }
-                .font(.system(size: 10))
-                .buttonStyle(.bordered)
-                .controlSize(.mini)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.bottom, 6)
     }
 
     // MARK: - Empty State
@@ -217,6 +183,7 @@ struct OverlayContentView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 24)
+        .overlay(WindowDragRegion())
     }
 
     // MARK: - Background
@@ -224,15 +191,22 @@ struct OverlayContentView: View {
     @ViewBuilder
     private var overlayBackground: some View {
         let settings = settingsStore.settings
+        let cornerRadius: CGFloat = 14
         switch settings.displayMode {
         case .glass:
-            RoundedRectangle(cornerRadius: 14)
-                .fill(.thickMaterial)
-                .opacity(0.3 + settings.glassIntensity * 0.7)
+            Color.clear
+        case .frosted:
+            let intensity = min(max(settings.glassIntensity, 0), 1)
+            ZStack {
+                FrostedBlurBackground(cornerRadius: cornerRadius)
+
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(Color.black.opacity(0.08 + intensity * 0.24))
+            }
         case .transparent:
-            RoundedRectangle(cornerRadius: 14)
-                .fill(.ultraThinMaterial)
-                .opacity(0.2 + settings.transparentOpacity * 0.8)
+            let transparency = min(max(settings.transparentOpacity, 0), 1)
+            RoundedRectangle(cornerRadius: cornerRadius)
+                .fill(Color.black.opacity(0.50 - transparency * 0.42))
         }
     }
 
@@ -244,13 +218,13 @@ struct OverlayContentView: View {
         var result: [(category: DeskTipsCore.Category?, items: [TodoItem])] = []
 
         for cat in sorted {
-            let catItems = store.items.filter { $0.categoryID == cat.id }
+            let catItems = overlaySortedItems(store.items.filter { $0.categoryID == cat.id })
             if !catItems.isEmpty {
                 result.append((category: cat, items: catItems))
             }
         }
 
-        let uncategorized = store.items.filter { $0.categoryID == nil }
+        let uncategorized = overlaySortedItems(store.items.filter { $0.categoryID == nil })
         if !uncategorized.isEmpty {
             result.append((category: nil, items: uncategorized))
         }
@@ -258,11 +232,142 @@ struct OverlayContentView: View {
         return result
     }
 
+    private var overlayTitle: String {
+        settingsStore.settings.overlayTitle.isEmpty ? "DeskTips" : settingsStore.settings.overlayTitle
+    }
+
+    private func overlaySortedItems(_ items: [TodoItem]) -> [TodoItem] {
+        items.enumerated().sorted { lhs, rhs in
+            let left = lhs.element
+            let right = rhs.element
+
+            if left.isCompleted != right.isCompleted {
+                return !left.isCompleted && right.isCompleted
+            }
+
+            if left.isCompleted, right.isCompleted {
+                let leftCompletedAt = left.completedAt ?? .distantPast
+                let rightCompletedAt = right.completedAt ?? .distantPast
+                if leftCompletedAt != rightCompletedAt {
+                    return leftCompletedAt < rightCompletedAt
+                }
+            }
+
+            return lhs.offset < rhs.offset
+        }
+        .map(\.element)
+    }
+
     private func priorityColor(_ priority: Priority) -> Color {
         switch priority {
         case .high: return .red
         case .medium: return .orange
         case .low: return .green
+        }
+    }
+}
+
+// MARK: - Frosted Blur Background
+
+private struct FrostedBlurBackground: NSViewRepresentable {
+    let cornerRadius: CGFloat
+
+    func makeNSView(context: Context) -> BlurView {
+        let view = BlurView()
+        configure(view)
+        return view
+    }
+
+    func updateNSView(_ nsView: BlurView, context: Context) {
+        configure(nsView)
+    }
+
+    private func configure(_ view: BlurView) {
+        view.material = .hudWindow
+        view.blendingMode = .behindWindow
+        view.state = .active
+        view.wantsLayer = true
+        view.layer?.cornerRadius = cornerRadius
+        view.layer?.masksToBounds = true
+    }
+
+    final class BlurView: NSVisualEffectView {
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+}
+
+// MARK: - Glass Container
+
+private struct GlassEffectContainer<Content: View>: NSViewRepresentable {
+    let cornerRadius: CGFloat
+    let tintOpacity: Double
+    let content: Content
+
+    init(
+        cornerRadius: CGFloat,
+        tintOpacity: Double,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.cornerRadius = cornerRadius
+        self.tintOpacity = tintOpacity
+        self.content = content()
+    }
+
+    func makeNSView(context: Context) -> GlassContainerView<Content> {
+        let view = GlassContainerView(rootView: content)
+        configure(view)
+        return view
+    }
+
+    func updateNSView(_ nsView: GlassContainerView<Content>, context: Context) {
+        nsView.rootView = content
+        configure(nsView)
+    }
+
+    private func configure(_ view: GlassContainerView<Content>) {
+        view.style = .clear
+        view.cornerRadius = cornerRadius
+        view.tintColor = tintOpacity > 0 ? NSColor.white.withAlphaComponent(tintOpacity) : nil
+    }
+
+    final class GlassContainerView<HostedContent: View>: NSGlassEffectView {
+        private let hostingView: NSHostingView<HostedContent>
+
+        var rootView: HostedContent {
+            get { hostingView.rootView }
+            set {
+                hostingView.rootView = newValue
+                invalidateIntrinsicContentSize()
+            }
+        }
+
+        init(rootView: HostedContent) {
+            hostingView = NSHostingView(rootView: rootView)
+            super.init(frame: .zero)
+
+            hostingView.translatesAutoresizingMaskIntoConstraints = false
+            hostingView.wantsLayer = true
+            hostingView.layer?.backgroundColor = NSColor.clear.cgColor
+
+            contentView = hostingView
+
+            NSLayoutConstraint.activate([
+                hostingView.leadingAnchor.constraint(equalTo: leadingAnchor),
+                hostingView.trailingAnchor.constraint(equalTo: trailingAnchor),
+                hostingView.topAnchor.constraint(equalTo: topAnchor),
+                hostingView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            ])
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) { fatalError() }
+
+        override var intrinsicContentSize: NSSize {
+            hostingView.intrinsicContentSize
+        }
+
+        override var fittingSize: NSSize {
+            hostingView.fittingSize
         }
     }
 }
@@ -282,63 +387,34 @@ extension Color {
     }
 }
 
-// MARK: - AppKit Drag Handle
+// MARK: - AppKit Window Drag Region
 
-private struct DragHandleView: NSViewRepresentable {
-    func makeNSView(context: Context) -> HandleView { HandleView() }
-    func updateNSView(_ nsView: HandleView, context: Context) {}
+private struct WindowDragRegion: NSViewRepresentable {
+    func makeNSView(context: Context) -> DragRegionView { DragRegionView() }
+    func updateNSView(_ nsView: DragRegionView, context: Context) {}
 
-    class HandleView: NSView {
-        private var isHovering = false
-
+    final class DragRegionView: NSView {
         override init(frame frameRect: NSRect) {
             super.init(frame: frameRect)
             wantsLayer = true
-            layer?.cornerRadius = 6
-            setupTracking()
-            addDragIndicator()
+            layer?.backgroundColor = NSColor.clear.cgColor
         }
 
         required init?(coder: NSCoder) { fatalError() }
 
-        private func setupTracking() {
-            addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect, .mouseMoved], owner: self, userInfo: nil))
-        }
+        override var acceptsFirstResponder: Bool { false }
 
-        private func addDragIndicator() {
-            let indicator = NSView()
-            indicator.wantsLayer = true
-            indicator.layer?.backgroundColor = NSColor.secondaryLabelColor.withAlphaComponent(0.35).cgColor
-            indicator.layer?.cornerRadius = 2
-            indicator.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(indicator)
-            NSLayoutConstraint.activate([
-                indicator.centerXAnchor.constraint(equalTo: centerXAnchor),
-                indicator.centerYAnchor.constraint(equalTo: centerYAnchor),
-                indicator.widthAnchor.constraint(equalToConstant: 36),
-                indicator.heightAnchor.constraint(equalToConstant: 4),
-            ])
-        }
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-        override func mouseEntered(with event: NSEvent) {
-            isHovering = true
-            NSCursor.openHand.push()
-            NSAnimationContext.runAnimationGroup { $0.duration = 0.15; self.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.08).cgColor }
-        }
-
-        override func mouseExited(with event: NSEvent) {
-            isHovering = false
-            NSCursor.pop()
-            NSAnimationContext.runAnimationGroup { $0.duration = 0.15; self.layer?.backgroundColor = NSColor.clear.cgColor }
+        override func resetCursorRects() {
+            super.resetCursorRects()
+            addCursorRect(bounds, cursor: .openHand)
         }
 
         override func mouseDown(with event: NSEvent) {
             NSCursor.closedHand.push()
             window?.performDrag(with: event)
             NSCursor.closedHand.pop()
-            if !isHovering { layer?.backgroundColor = NSColor.clear.cgColor }
         }
-
-        override var acceptsFirstResponder: Bool { false }
     }
 }

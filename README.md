@@ -16,15 +16,22 @@ macOS 桌面悬浮待办工具 — 半透明置顶显示，不影响日常使用
 - **窗口位置记忆**：重启后自动恢复上次位置和显示设置
 
 ### 主窗口
-- **四标签页**：待办、分类、历史、设置
+- **五标签页**：待办、分类、历史、设置、关于
 - **待办**：增强表单（分类选择、优先级、截止日期），分类筛选器，拖拽排序
 - **分类管理**：新增/编辑/删除分类，自定义颜色和图标
 - **历史**：已完成事项按日期分组（今天/昨天/具体日期），支持恢复和永久删除
-- **设置**：悬浮窗模式切换、强度控制、通知提醒配置、开机自启动、版本信息
+- **设置**：悬浮窗模式切换、强度控制、通知提醒配置、开机自启动
+- **关于**：版本信息、GitHub 仓库入口、应用内更新检查与更新说明
 
 ### 系统通知
 - 截止日期前提醒通知（可配置：5分/15分/30分/1小时/1天）
 - 过期待办启动时汇总提醒
+
+### 应用内更新
+- Sparkle 2 自更新：启动后静默检查更新，关于页可手动检查并展示更新日志
+- 更新提醒：发现新版本时菜单栏图标和关于页显示红点
+- GitHub Releases 分发：DMG 和 `appcast.xml` 作为同一个 release 的资产发布
+- 更新包使用 EdDSA 签名校验，防止安装包被篡改
 
 ### 菜单栏
 - 顶部状态栏图标，点击弹出快捷面板
@@ -68,7 +75,8 @@ desk_tips/
 │   │   ├── TodoListView.swift           # 待办列表+增强表单
 │   │   ├── CategoryManageView.swift     # 分类管理
 │   │   ├── HistoryView.swift            # 历史按日期
-│   │   └── MainSettingsView.swift       # 设置+通知配置
+│   │   ├── MainSettingsView.swift       # 设置+通知配置
+│   │   └── MainAboutView.swift          # 版本、仓库与更新检查
 │   ├── Services/
 │   │   └── NotificationManager.swift    # 系统通知管理
 │   └── Resources/
@@ -103,6 +111,71 @@ xcodebuild -project DeskTips.xcodeproj -scheme DeskTips -configuration Debug bui
 # 运行
 open ~/Library/Developer/Xcode/DerivedData/DeskTips-*/Build/Products/Debug/DeskTips.app
 ```
+
+## 发布更新
+
+DeskTips 使用 Sparkle + GitHub Releases 做应用内更新。客户端读取：
+
+```text
+https://github.com/hhcme/desk_tips/releases/latest/download/appcast.xml
+```
+
+本地生成发布物：
+
+```bash
+VERSION=1.1.1 BUILD=111 ./scripts/package_release.sh
+```
+
+产物会写入：
+
+```text
+dist/DeskTips-1.1.1-macOS.dmg
+dist/appcast.xml
+```
+
+Sparkle 自更新要求发布包同时满足两层签名：
+
+- Apple Code Signing：App、Sparkle framework 和 helper 必须使用稳定的 Developer ID Application 身份签名。
+- Sparkle EdDSA：`appcast.xml` 里的 enclosure 必须由 Sparkle 私钥签名。
+
+如果发布包是 ad-hoc 签名，客户端可以下载更新，但安装阶段会失败。
+
+首次配置 GitHub Actions 前，需要把 Sparkle 私钥导出到仓库 secret：
+
+```bash
+~/Library/Developer/Xcode/DerivedData/DeskTips-*/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_keys \
+  --account com.desktips.app \
+  -x /tmp/desktips_sparkle_private_key
+
+pbcopy < /tmp/desktips_sparkle_private_key
+```
+
+然后在 GitHub 仓库添加这些 secrets：
+
+```text
+SPARKLE_PRIVATE_KEY
+APPLE_DEVELOPER_ID_CERTIFICATE_BASE64
+APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD
+KEYCHAIN_PASSWORD
+APPLE_ID
+APPLE_APP_SPECIFIC_PASSWORD
+APPLE_TEAM_ID
+```
+
+`APPLE_DEVELOPER_ID_CERTIFICATE_BASE64` 是 Developer ID Application 证书的 `.p12` 文件 base64 内容：
+
+```bash
+base64 -i DeveloperIDApplication.p12 | pbcopy
+```
+
+推送 tag 后会自动签名、公证、生成 appcast 并发布：
+
+```bash
+git tag v1.1.1
+git push origin v1.1.1
+```
+
+Sparkle 会读取 `appcast.xml` 里的 Markdown 更新日志，客户端会解析后在主窗口“关于”页内展示。
 
 ## 系统要求
 
